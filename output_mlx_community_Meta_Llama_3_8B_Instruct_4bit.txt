@@ -1,8 +1,8 @@
 Model: mlx-community/Meta-Llama-3-8B-Instruct-4bit
 Prompt: build a react app like facebook
 Tokens Generated: 800
-Tokens/sec: 7.74
-Inference Time: 103.36s
+Tokens/sec: 12.98
+Inference Time: 61.61s
 --------------------------------------------------------------------------------
 FULL RESPONSE:
 --------------------------------------------------------------------------------

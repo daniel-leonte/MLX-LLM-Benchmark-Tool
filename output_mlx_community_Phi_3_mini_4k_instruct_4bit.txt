@@ -1,8 +1,8 @@
 Model: mlx-community/Phi-3-mini-4k-instruct-4bit
 Prompt: build a react app like facebook
 Tokens Generated: 193
-Tokens/sec: 10.15
-Inference Time: 19.02s
+Tokens/sec: 10.98
+Inference Time: 17.58s
 --------------------------------------------------------------------------------
 FULL RESPONSE:
 --------------------------------------------------------------------------------

@@ -1,0 +1,29 @@
+Model: mlx-community/Mistral-7B-Instruct-v0.3-4bit
+Prompt: build a react app like facebook
+Tokens Generated: 286
+Tokens/sec: 11.13
+Inference Time: 25.69s
+--------------------------------------------------------------------------------
+FULL RESPONSE:
+--------------------------------------------------------------------------------
+Act as a Senior Software Engineer with expertise in React and modern web development practices.
+
+SCOPE & CONTEXT:
+The user requires a React application similar to Facebook. The specific technology stack is not provided, so this prompt will be language-agnostic.
+
+REQUIREMENTS:
+1. Create a single-page application (SPA) with a user-friendly interface.
+2. Implement user authentication and authorization.
+3. Develop a news feed featuring user posts, photos, and videos.
+4. Implement real-time chat functionality.
+5. Integrate with a third-party API for user profile pictures and cover photos.
+6. Ensure the application is responsive and accessible.
+
+GENERAL BEST PRACTICES:
+1. Write clean, modular, and well-documented code.
+2. Follow React best practices, such as using functional components and hooks.
+3. Optimize for performance and user experience.
+4. Consider security best practices, such as input validation and sanitization.
+
+GOAL:
+Deliver a React application similar to Facebook, featuring user authentication, a news feed, real-time chat, third-party API integration, and responsive design. Ensure the code is clean, modular, and well-documented, with a focus on performance, user experience, and security.

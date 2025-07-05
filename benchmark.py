@@ -79,9 +79,9 @@ MODELS = [
     ("mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit", {}),
     ("mlx-community/Meta-Llama-3-8B-Instruct-4bit", {}),
     # Add any MLX model without worrying about chat templates!
-    # ("mlx-community/gemma-2b-it-4bit", {}),
-    # ("mlx-community/Qwen2-1.5B-Instruct-4bit", {}),
-    # ("mlx-community/Mistral-7B-Instruct-v0.3-4bit", {}),
+    ("mlx-community/gemma-2b-it-4bit", {}),
+    ("mlx-community/Qwen2-1.5B-Instruct-4bit", {}),
+    ("mlx-community/Mistral-7B-Instruct-v0.3-4bit", {}),
 ]
 
 def install_dependencies():
@@ -171,6 +171,7 @@ def benchmark_model(model_name: str, special_params: Dict[str, Any], similarity_
         "tokens_per_sec": 0.0,
         "similarity_score": 0.0,
         "generated_text": "",
+        "output_file": "",
         "error": None
     }
     
@@ -198,11 +199,20 @@ def benchmark_model(model_name: str, special_params: Dict[str, Any], similarity_
         
         # Use tokenizer's built-in chat template for consistent formatting
         try:
-            # Create conversation with system and user messages
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": CUSTOM_PROMPT}
-            ]
+            # Mistral models prefer user-first conversations without separate system roles
+            if "mistral" in model_name.lower():
+                # Combine system prompt with user prompt for Mistral models
+                combined_prompt = f"{SYSTEM_PROMPT}\n\n{CUSTOM_PROMPT}"
+                messages = [
+                    {"role": "user", "content": combined_prompt}
+                ]
+                print(f"🔧 Using Mistral-optimized format (user-first)")
+            else:
+                # Standard system + user format for other models
+                messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": CUSTOM_PROMPT}
+                ]
             
             # Apply the model's chat template
             if hasattr(tokenizer, 'apply_chat_template') and tokenizer.chat_template:
@@ -336,7 +346,10 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
     # Add detailed sections for each model
     for _, row in df.iterrows():
         output_file = row.get('output_file', '')
-        if output_file and os.path.exists(output_file):
+        # Handle NaN values (pandas converts None to NaN which is a float)
+        if pd.isna(output_file):
+            output_file = ''
+        if output_file and isinstance(output_file, str) and os.path.exists(output_file):
             try:
                 with open(output_file, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -452,7 +465,7 @@ def main():
     print(f"\n📊 Results saved to {output_file}")
     
     # Generate HTML report
-    output_files = [row.get('output_file', '') for _, row in df.iterrows()]
+    output_files = [row.get('output_file', '') if not pd.isna(row.get('output_file', '')) else '' for _, row in df.iterrows()]
     generate_html_report(df, output_files)
     
     # Summary statistics

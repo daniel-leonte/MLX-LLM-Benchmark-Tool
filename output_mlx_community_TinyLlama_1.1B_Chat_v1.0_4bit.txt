@@ -1,8 +1,8 @@
 Model: mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit
 Prompt: build a react app like facebook
 Tokens Generated: 488
-Tokens/sec: 33.12
-Inference Time: 14.74s
+Tokens/sec: 35.75
+Inference Time: 13.65s
 --------------------------------------------------------------------------------
 FULL RESPONSE:
 --------------------------------------------------------------------------------
