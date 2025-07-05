@@ -1,6 +1,13 @@
-model_name,framework,load_time,peak_memory_mb,inference_time,tokens_generated,tokens_per_sec,similarity_score,generated_text,error
-mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit,mlx,0.3151644159997886,728.515625,0.38230237500010844,51,133.40225783317598,0.8100292086601257,"The Pythagorean theorem states that the square of the distance between two points on a right-angle triangle is equal to the sum of the squares of the distances to the two adjacent sides.
+model_name,framework,load_time,peak_memory_mb,inference_time,tokens_generated,tokens_per_sec,similarity_score,generated_text,error,output_file
+mlx-community/Phi-3-mini-4k-instruct-4bit,mlx,0.648190791000161,2097.75,23.432216749999498,193,8.236523332774485,0.776465892791748,"Act as a Senior React Developer
 
-Question: Ca",
-mlx-community/Phi-3-mini-4k-instruct-4bit,mlx,0.6192333750004764,1099.59375,0.9588538750003863,50,52.14558891987568,0.9365590214729309,"The Pythagorean theorem states that in a right-angled triangle, the square of the length of the hypotenuse (the side opposite the right angle) is equal to the sum of the squares of the lengths of the ",
-mlx-community/Meta-Llama-3-8B-Instruct-4bit,mlx,73.73411825000039,-503.890625,5.7210737499999595,50,8.73961815297353,0.9265503883361816,"The Pythagorean theorem states that in a right-angled triangle, the square of the hypotenuse side is equal to the sum of squares of the other two sides. Mathematically, it can be expressed as: a^2 + b",
+CLARIFY SCOPE & CONTEXT:
+- Known technologies: React, JavaScript
+- Missing details: Specific requirements for the Facebook-like application
+
+ENFORCE ACTIONABLE STRUCTU",,output_mlx_community_Phi_3_mini_4k_instruct_4bit.txt
+mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit,mlx,0.400101208999331,701.078125,19.261372541999663,463,24.037746998061678,0.7525601983070374,"I don't have the capability to build a react app like facebook. However, I can provide you with a general framework for building a react app like facebook. Here are the steps:
+
+1. Choose a framework:
+",,output_mlx_community_TinyLlama_1.1B_Chat_v1.0_4bit.txt
+mlx-community/Meta-Llama-3-8B-Instruct-4bit,mlx,2.2428989580002963,1130.59375,137.6396871249999,369,2.6809128072551207,0.5417125821113586,"Your refactored prompt is excellent! It clearly outlines the requirements for building a React app like Facebook, covering various aspects such as frontend, backend, features, security, and testing. T",,output_mlx_community_Meta_Llama_3_8B_Instruct_4bit.txt

@@ -25,18 +25,63 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 warnings.filterwarnings("ignore")
 
 # Configuration
-CUSTOM_PROMPT = "Explain the Pythagorean theorem concisely."
-GOLD_ANSWER = "The Pythagorean theorem states that in a right triangle, the square of the hypotenuse equals the sum of squares of the other two sides: a² + b² = c²."
-MAX_NEW_TOKENS = 50
+SYSTEM_PROMPT = """You are PromptCraft Architect, an AI specializing in refactoring user inputs into precise, structured, plain-text prompts for other advanced LLMs. Your focus is on a wide range of technical tasks for developers, from creating entire applications to fixing small bugs.
+
+Core Mission: Convert any developer request into a superior, plain-text prompt that clarifies intent and elicits the best possible technical response from an LLM, without inventing details.
+
+Guiding Principles:
+Precision is Paramount: Eliminate ambiguity. Be explicit.
+Context is Key, Not Assumed: Structure the user's provided context. Do not invent a tech stack or add technical details the user did not provide or clearly imply.
+Structure for Clarity: Use capitalized headers, lists, and line breaks to create a logical, easy-to-follow request.
+Adapt to Scope: Your output structure must fit the task, whether it's an end-to-end solution for an application or feature, a single function, or a debugging request.
+
+Execution Workflow
+
+1. Input Interpretation:
+Treat the entire user input as a draft prompt to rewrite.
+NEVER engage conversationally. Your sole function is prompt refinement.
+
+2. The Refactoring Blueprint:
+Construct the optimized prompt using these steps:
+
+A. ESTABLISH PERSONA:
+Begin with "Act as..." defining a relevant technical expert. If the tech stack is ambiguous, use a generalist persona like "Senior Software Engineer".
+
+B. CLARIFY SCOPE & CONTEXT:
+Analyze the input for what is known and what is missing.
+Explicitly state the known technologies. If a critical detail like programming language is missing, frame the request to be language-agnostic or use a placeholder like [Specify Language] to guide the end-user.
+Crucially, do not add assumptions. If the user asks for a "database script" without specifying the database, do not add "PostgreSQL." Frame the prompt around "a generic SQL script."
+
+C. ENFORCE ACTIONABLE STRUCTURE:
+Transform the request into a direct set of instructions or requirements.
+For creation tasks, detail what needs to be built.
+For debugging/refactoring tasks, clearly present the problematic code and the desired change or outcome.
+
+D. ADD GENERAL BEST PRACTICES:
+Where appropriate, incorporate general, non-stack-specific constraints like "Ensure the code is well-commented," "Consider security best practices," or "Optimize for readability."
+
+E. DEFINE CONCRETE GOAL:
+Conclude with GOAL: - a clear, one-sentence summary of the user's intended outcome.
+
+3. Output Rules (Non-Negotiable):
+Your output MUST BE the optimized prompt exclusively.
+The entire output prompt must be plain text. Do not use markdown characters.
+NO preambles, apologies, or meta-commentary."""
+
+CUSTOM_PROMPT = "build a react app like facebook"
+GOLD_ANSWER = "Act as a Senior React Developer. Create a comprehensive social media application using React that includes core Facebook-like features: user authentication, news feed, post creation, commenting system, friend connections, and responsive design. Implement component-based architecture with proper state management, ensure accessibility standards, and optimize for performance. GOAL: Build a complete React-based social networking application with essential Facebook-style functionality."
+MAX_NEW_TOKENS = 800  # Allow full technical responses for complex prompts
 
 # MLX Community model configurations: (model_name, prompt_template, special_params)
 MODELS = [
-    ("mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit", "Question: {prompt}\nAnswer:", {}),
-    ("mlx-community/Phi-3-mini-4k-instruct-4bit", "Question: {prompt}\nAnswer:", {"repetition_penalty": 1.1}),
-    ("mlx-community/Meta-Llama-3-8B-Instruct-4bit", "Question: {prompt}\nAnswer:", {}),
-    # Add more models as needed - expand the list with verified MLX models
-    # ("mlx-community/gemma-2b-it-4bit", "Question: {prompt}\nAnswer:", {}),
-    # ("mlx-community/Qwen2-1.5B-Instruct-4bit", "Question: {prompt}\nAnswer:", {}),
+    # Test with one model first to show the improvement
+    ("mlx-community/Phi-3-mini-4k-instruct-4bit", 
+     "<|system|>\n{system_prompt}<|end|>\n<|user|>\n{prompt}<|end|>\n<|assistant|>\n", {"repetition_penalty": 1.1}),
+    # Uncomment to test all models
+    ("mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit", 
+     "<|system|>\n{system_prompt}<|user|>\n{prompt}<|assistant|>\n", {}),
+    ("mlx-community/Meta-Llama-3-8B-Instruct-4bit", 
+     "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n", {}),
 ]
 
 def install_dependencies():
@@ -151,8 +196,8 @@ def benchmark_model(model_name: str, prompt_template: str, special_params: Dict[
         # Run inference
         start_time = time.perf_counter()
         
-        # Format prompt using template
-        formatted_prompt = prompt_template.format(prompt=CUSTOM_PROMPT)
+        # Format prompt using template with system prompt and user prompt
+        formatted_prompt = prompt_template.format(system_prompt=SYSTEM_PROMPT, prompt=CUSTOM_PROMPT)
         
         # MLX inference - using simpler parameters
         response = generate(
@@ -167,13 +212,11 @@ def benchmark_model(model_name: str, prompt_template: str, special_params: Dict[
         if response.startswith(formatted_prompt):
             response = response[len(formatted_prompt):].strip()
         else:
-            # Fallback: try to find where the answer starts
-            if "Answer:" in response:
-                response = response.split("Answer:", 1)[1].strip()
-            elif "Bot:" in response:
-                response = response.split("Bot:", 1)[1].strip()
-            elif "[/INST]" in response:
-                response = response.split("[/INST]", 1)[1].strip()
+            # Fallback: try to find where the response starts based on model tokens
+            for token in ["<|assistant|>", "<|end|>\n", "<|end_header_id|>\n\n", "Answer:", "Bot:", "[/INST]"]:
+                if token in response:
+                    response = response.split(token, 1)[1].strip()
+                    break
         
         # Count tokens in the response
         tokens_generated = len(tokenizer.encode(response)) if response else 0
@@ -184,7 +227,25 @@ def benchmark_model(model_name: str, prompt_template: str, special_params: Dict[
         results["inference_time"] = inference_time
         results["tokens_generated"] = tokens_generated
         results["tokens_per_sec"] = tokens_per_sec
-        results["generated_text"] = response[:200]  # Truncate for display
+        # Save full response to individual file and store truncated version in CSV
+        output_filename = f"output_{model_name.replace('/', '_').replace('-', '_')}.txt"
+        try:
+            with open(output_filename, 'w', encoding='utf-8') as f:
+                f.write(f"Model: {model_name}\n")
+                f.write(f"Prompt: {CUSTOM_PROMPT}\n")
+                f.write(f"Tokens Generated: {tokens_generated}\n")
+                f.write(f"Tokens/sec: {tokens_per_sec:.2f}\n")
+                f.write(f"Inference Time: {inference_time:.2f}s\n")
+                f.write("-" * 80 + "\n")
+                f.write("FULL RESPONSE:\n")
+                f.write("-" * 80 + "\n")
+                f.write(response)
+            print(f"📝 Full output saved to: {output_filename}")
+        except Exception as e:
+            print(f"⚠️  Could not save output file: {e}")
+        
+        results["generated_text"] = response[:200]  # Keep CSV manageable
+        results["output_file"] = output_filename
         
         # Check for meaningful output
         if tokens_generated < 5:
@@ -195,8 +256,10 @@ def benchmark_model(model_name: str, prompt_template: str, special_params: Dict[
             similarity_score = compute_similarity(response, GOLD_ANSWER, similarity_model)
             results["similarity_score"] = similarity_score
         
-        print(f"Generated: {response[:100]}...")
+        print(f"Generated: {response[:200]}...")
         print(f"Tokens/sec: {tokens_per_sec:.2f}, Tokens: {tokens_generated}")
+        if len(response) > 200:
+            print(f"[Response continues for {len(response)} total characters]")
         
         # Clean up model
         del model
@@ -210,6 +273,98 @@ def benchmark_model(model_name: str, prompt_template: str, special_params: Dict[
         clear_memory()
     
     return results
+
+def generate_html_report(df: pd.DataFrame, output_files: List[str]):
+    """Generate an HTML report with full outputs"""
+    
+    # Create HTML header with embedded CSS
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>MLX LLM Benchmark Results</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        .header {{ background-color: #f0f0f0; padding: 20px; border-radius: 5px; }}
+        .model-section {{ margin: 30px 0; border: 1px solid #ddd; border-radius: 5px; }}
+        .model-header {{ background-color: #e8f4f8; padding: 15px; font-weight: bold; }}
+        .metrics {{ display: flex; gap: 20px; padding: 15px; background-color: #f9f9f9; }}
+        .metric {{ text-align: center; }}
+        .metric-value {{ font-size: 1.5em; font-weight: bold; color: #2196F3; }}
+        .metric-label {{ font-size: 0.9em; color: #666; }}
+        .output {{ padding: 20px; font-family: monospace; background-color: #f8f8f8; 
+                 white-space: pre-wrap; border-top: 1px solid #ddd; }}
+        .summary-table {{ width: 100%%; border-collapse: collapse; margin: 20px 0; }}
+        .summary-table th, .summary-table td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        .summary-table th {{ background-color: #f2f2f2; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 MLX LLM Benchmark Results</h1>
+        <p><strong>🍎 Apple Silicon Optimized</strong> | PromptCraft Architect Test</p>
+        <p><strong>Prompt:</strong> "{CUSTOM_PROMPT}"</p>
+        <p><strong>System Prompt:</strong> PromptCraft Architect (Technical Prompt Refinement)</p>
+    </div>
+    
+    <h2>📊 Summary Table</h2>
+    {df.to_html(classes="summary-table", escape=False, index=False)}
+    
+    <h2>📝 Detailed Outputs</h2>
+"""
+    
+    # Add detailed sections for each model
+    for _, row in df.iterrows():
+        output_file = row.get('output_file', '')
+        if output_file and os.path.exists(output_file):
+            try:
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # Extract just the response part
+                    if "FULL RESPONSE:" in content:
+                        response = content.split("FULL RESPONSE:\n" + "-" * 80 + "\n")[1]
+                    else:
+                        response = content
+                
+                html_content += f"""
+    <div class="model-section">
+        <div class="model-header">{row['model_name']}</div>
+        <div class="metrics">
+            <div class="metric">
+                <div class="metric-value">{row['tokens_per_sec']:.1f}</div>
+                <div class="metric-label">Tokens/sec</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">{row['tokens_generated']}</div>
+                <div class="metric-label">Tokens</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">{row['load_time']:.2f}s</div>
+                <div class="metric-label">Load Time</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">{row['peak_memory_mb']:.0f}MB</div>
+                <div class="metric-label">Memory</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">{row['similarity_score']:.3f}</div>
+                <div class="metric-label">Similarity</div>
+            </div>
+        </div>
+        <div class="output">{response}</div>
+    </div>
+"""
+            except Exception as e:
+                print(f"Could not read {output_file}: {e}")
+    
+    html_content += """
+</body>
+</html>
+"""
+    
+    with open("benchmark_report.html", "w", encoding="utf-8") as f:
+        f.write(html_content)
+    
+    print("🌐 HTML report generated: benchmark_report.html")
 
 def main():
     """Main benchmarking function"""
@@ -275,6 +430,10 @@ def main():
     df.to_csv(output_file, index=False)
     print(f"\n📊 Results saved to {output_file}")
     
+    # Generate HTML report
+    output_files = [row.get('output_file', '') for _, row in df.iterrows()]
+    generate_html_report(df, output_files)
+    
     # Summary statistics
     successful_runs = df[df['error'].isna()]
     if not successful_runs.empty:
@@ -293,7 +452,10 @@ def main():
     else:
         print("\n❌ No successful benchmark runs completed")
     
-    print(f"\n🏁 Benchmarking complete! Results saved to {output_file}")
+    print(f"\n🏁 Benchmarking complete!")
+    print(f"📊 CSV: {output_file}")
+    print(f"🌐 HTML Report: benchmark_report.html")
+    print(f"📝 Individual outputs: output_*.txt files")
 
 if __name__ == "__main__":
     main() 
