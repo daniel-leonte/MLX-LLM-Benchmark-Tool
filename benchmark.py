@@ -24,6 +24,10 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
+# Create results directory
+RESULTS_DIR = Path("results")
+RESULTS_DIR.mkdir(exist_ok=True)
+
 # Configuration
 SYSTEM_PROMPT = """You are PromptCraft Architect, an AI specializing in refactoring user inputs into precise, structured, plain-text prompts for other advanced LLMs. Your focus is on a wide range of technical tasks for developers, from creating entire applications to fixing small bugs.
 
@@ -69,7 +73,26 @@ The entire output prompt must be plain text. Do not use markdown characters.
 NO preambles, apologies, or meta-commentary."""
 
 CUSTOM_PROMPT = "build a react app like facebook"
-GOLD_ANSWER = "Act as a Senior React Developer. Create a comprehensive social media application using React that includes core Facebook-like features: user authentication, news feed, post creation, commenting system, friend connections, and responsive design. Implement component-based architecture with proper state management, ensure accessibility standards, and optimize for performance. GOAL: Build a complete React-based social networking application with essential Facebook-style functionality."
+
+GOLD_ANSWER = """Act as a Senior Software Engineer specializing in React.
+
+CONTEXT:
+The user wants to create a React application similar to Facebook.
+
+INSTRUCTIONS:
+Develop a React application with the following features:
+  - User authentication (registration, login, logout).
+  - User profiles (displaying user information).
+  - Friend requests and management.
+  - Posting and viewing of text-based status updates.
+  - Basic news feed displaying posts from friends.
+
+Ensure the application is responsive and has a clean UI.
+Consider state management (e.g., using Context, Redux, or a similar library).
+Implement a basic backend (can be mocked or a simple API) for user data, posts, and friend connections.
+
+GOAL: Create a functional React application that mimics key features of Facebook."""
+
 MAX_NEW_TOKENS = 800  # Allow full technical responses for complex prompts
 
 # MLX Community model configurations: (model_name, special_params)
@@ -79,7 +102,6 @@ MODELS = [
     ("mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit", {}),
     ("mlx-community/Meta-Llama-3-8B-Instruct-4bit", {}),
     # Add any MLX model without worrying about chat templates!
-    ("mlx-community/gemma-2b-it-4bit", {}),
     ("mlx-community/Qwen2-1.5B-Instruct-4bit", {}),
     ("mlx-community/Mistral-7B-Instruct-v0.3-4bit", {}),
 ]
@@ -259,7 +281,7 @@ def benchmark_model(model_name: str, special_params: Dict[str, Any], similarity_
         results["tokens_generated"] = tokens_generated
         results["tokens_per_sec"] = tokens_per_sec
         # Save full response to individual file and store truncated version in CSV
-        output_filename = f"output_{model_name.replace('/', '_').replace('-', '_')}.txt"
+        output_filename = RESULTS_DIR / f"output_{model_name.replace('/', '_').replace('-', '_')}.txt"
         try:
             with open(output_filename, 'w', encoding='utf-8') as f:
                 f.write(f"Model: {model_name}\n")
@@ -276,7 +298,7 @@ def benchmark_model(model_name: str, special_params: Dict[str, Any], similarity_
             print(f"⚠️  Could not save output file: {e}")
         
         results["generated_text"] = response[:200]  # Keep CSV manageable
-        results["output_file"] = output_filename
+        results["output_file"] = str(output_filename)
         
         # Check for meaningful output
         if tokens_generated < 5:
@@ -395,10 +417,11 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
 </html>
 """
     
-    with open("benchmark_report.html", "w", encoding="utf-8") as f:
+    html_file = RESULTS_DIR / "benchmark_report.html"
+    with open(html_file, "w", encoding="utf-8") as f:
         f.write(html_content)
     
-    print("🌐 HTML report generated: benchmark_report.html")
+    print(f"🌐 HTML report generated: {html_file}")
 
 def main():
     """Main benchmarking function"""
@@ -460,7 +483,7 @@ def main():
     print(display_df.to_string(index=False))
     
     # Save to CSV
-    output_file = "benchmark_results.csv"
+    output_file = RESULTS_DIR / "benchmark_results.csv"
     df.to_csv(output_file, index=False)
     print(f"\n📊 Results saved to {output_file}")
     
@@ -488,8 +511,8 @@ def main():
     
     print(f"\n🏁 Benchmarking complete!")
     print(f"📊 CSV: {output_file}")
-    print(f"🌐 HTML Report: benchmark_report.html")
-    print(f"📝 Individual outputs: output_*.txt files")
+    print(f"🌐 HTML Report: {RESULTS_DIR / 'benchmark_report.html'}")
+    print(f"📝 Individual outputs: {RESULTS_DIR / 'output_*.txt'} files")
 
 if __name__ == "__main__":
     main() 
