@@ -202,19 +202,19 @@ MODEL_CONFIG = {
     "medium": {
         "memory_limit_gb": 4.0,
         "models": [
-            ("mlx-community/Mistral-7B-Instruct-v0.3-4bit", {}),
-            ("mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", {}),
-            ("mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit", {}),
-            ("mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit", {}),
+            ("mlx-community/Mistral-7B-Instruct-v0.3-4bit", {}), # 1. this is the best model for this task
+            # ("mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", {}),
+            # ("mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit", {}),
+            # ("mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit", {}),
         ]
     },
     "large": {
         "memory_limit_gb": 6.0,
         "models": [
-            ("mlx-community/gemma-2-9b-it-4bit", {}),
-            ("mlx-community/Qwen3-8B-4bit", {}),
-            ("mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit", {}),
-            ("mlx-community/DeepSeek-R1-0528-Qwen3-8B-4bit", {}),
+            # ("mlx-community/gemma-2-9b-it-4bit", {}), # weird output
+            # ("mlx-community/Qwen3-8B-4bit", {}), # maybe ok, but need to remove thinking output before the refactoredprompt output
+            ("mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit", {}), # 2. its good, concise, but at least at the first test, ran slow and consume some memory
+            # ("mlx-community/DeepSeek-R1-0528-Qwen3-8B-4bit", {}), # has the thinking ouput, need to reeavaluate at some time maybe
         ]
     },
     "experimental": {
