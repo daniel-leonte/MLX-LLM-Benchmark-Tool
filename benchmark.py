@@ -72,16 +72,16 @@ CUSTOM_PROMPT = "build a react app like facebook"
 GOLD_ANSWER = "Act as a Senior React Developer. Create a comprehensive social media application using React that includes core Facebook-like features: user authentication, news feed, post creation, commenting system, friend connections, and responsive design. Implement component-based architecture with proper state management, ensure accessibility standards, and optimize for performance. GOAL: Build a complete React-based social networking application with essential Facebook-style functionality."
 MAX_NEW_TOKENS = 800  # Allow full technical responses for complex prompts
 
-# MLX Community model configurations: (model_name, prompt_template, special_params)
+# MLX Community model configurations: (model_name, special_params)
+# No need for manual chat templates - MLX models have built-in templates
 MODELS = [
-    # Test with one model first to show the improvement
-    ("mlx-community/Phi-3-mini-4k-instruct-4bit", 
-     "<|system|>\n{system_prompt}<|end|>\n<|user|>\n{prompt}<|end|>\n<|assistant|>\n", {"repetition_penalty": 1.1}),
-    # Uncomment to test all models
-    ("mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit", 
-     "<|system|>\n{system_prompt}<|user|>\n{prompt}<|assistant|>\n", {}),
-    ("mlx-community/Meta-Llama-3-8B-Instruct-4bit", 
-     "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n", {}),
+    ("mlx-community/Phi-3-mini-4k-instruct-4bit", {"repetition_penalty": 1.1}),
+    ("mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit", {}),
+    ("mlx-community/Meta-Llama-3-8B-Instruct-4bit", {}),
+    # Add any MLX model without worrying about chat templates!
+    # ("mlx-community/gemma-2b-it-4bit", {}),
+    # ("mlx-community/Qwen2-1.5B-Instruct-4bit", {}),
+    # ("mlx-community/Mistral-7B-Instruct-v0.3-4bit", {}),
 ]
 
 def install_dependencies():
@@ -157,7 +157,7 @@ def load_mlx_model(model_name: str) -> Tuple[Any, Any, str]:
         print(f"Error loading MLX model {model_name}: {e}")
         return None, None, "mlx"
 
-def benchmark_model(model_name: str, prompt_template: str, special_params: Dict[str, Any], similarity_model: Optional[SentenceTransformer] = None) -> Dict[str, Any]:
+def benchmark_model(model_name: str, special_params: Dict[str, Any], similarity_model: Optional[SentenceTransformer] = None) -> Dict[str, Any]:
     """Benchmark a single MLX model"""
     print(f"\nBenchmarking {model_name} (MLX)")
     
@@ -196,8 +196,31 @@ def benchmark_model(model_name: str, prompt_template: str, special_params: Dict[
         # Run inference
         start_time = time.perf_counter()
         
-        # Format prompt using template with system prompt and user prompt
-        formatted_prompt = prompt_template.format(system_prompt=SYSTEM_PROMPT, prompt=CUSTOM_PROMPT)
+        # Use tokenizer's built-in chat template for consistent formatting
+        try:
+            # Create conversation with system and user messages
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": CUSTOM_PROMPT}
+            ]
+            
+            # Apply the model's chat template
+            if hasattr(tokenizer, 'apply_chat_template') and tokenizer.chat_template:
+                formatted_prompt = tokenizer.apply_chat_template(
+                    messages, 
+                    tokenize=False, 
+                    add_generation_prompt=True
+                )
+                print(f"✅ Using model's built-in chat template")
+            else:
+                # Fallback to simple format if no chat template
+                formatted_prompt = f"System: {SYSTEM_PROMPT}\n\nUser: {CUSTOM_PROMPT}\n\nAssistant:"
+                print(f"⚠️  No chat template found, using fallback format")
+        
+        except Exception as e:
+            # Ultimate fallback
+            formatted_prompt = f"System: {SYSTEM_PROMPT}\n\nUser: {CUSTOM_PROMPT}\n\nAssistant:"
+            print(f"⚠️  Chat template error ({e}), using fallback format")
         
         # MLX inference - using simpler parameters
         response = generate(
@@ -208,15 +231,13 @@ def benchmark_model(model_name: str, prompt_template: str, special_params: Dict[
             verbose=False
         )
         
-        # Extract only the generated part (remove the prompt)
+        # Clean response by removing the input prompt
         if response.startswith(formatted_prompt):
             response = response[len(formatted_prompt):].strip()
         else:
-            # Fallback: try to find where the response starts based on model tokens
-            for token in ["<|assistant|>", "<|end|>\n", "<|end_header_id|>\n\n", "Answer:", "Bot:", "[/INST]"]:
-                if token in response:
-                    response = response.split(token, 1)[1].strip()
-                    break
+            # If the response doesn't start with our prompt, it might be already clean
+            # This can happen with some chat templates
+            response = response.strip()
         
         # Count tokens in the response
         tokens_generated = len(tokenizer.encode(response)) if response else 0
@@ -385,9 +406,9 @@ def main():
     # Run benchmarks
     all_results = []
     
-    for i, (model_name, prompt_template, special_params) in enumerate(MODELS, 1):
+    for i, (model_name, special_params) in enumerate(MODELS, 1):
         print(f"\n[{i}/{len(MODELS)}] Starting benchmark...")
-        results = benchmark_model(model_name, prompt_template, special_params, similarity_model)
+        results = benchmark_model(model_name, special_params, similarity_model)
         all_results.append(results)
         
         # Print intermediate results
