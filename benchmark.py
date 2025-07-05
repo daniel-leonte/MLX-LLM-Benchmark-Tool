@@ -11,6 +11,7 @@ import gc
 import psutil
 import subprocess
 import warnings
+import argparse
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
@@ -27,6 +28,101 @@ warnings.filterwarnings("ignore")
 # Create results directory
 RESULTS_DIR = Path("results")
 RESULTS_DIR.mkdir(exist_ok=True)
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description="MLX LLM Benchmark Tool")
+    parser.add_argument(
+        "--categories", 
+        nargs="+", 
+        default=["small", "medium"],
+        choices=["small", "medium", "large", "experimental", "all"],
+        help="Model categories to run (default: small medium)"
+    )
+    parser.add_argument(
+        "--list-models", 
+        action="store_true",
+        help="List all available models by category"
+    )
+    parser.add_argument(
+        "--memory-check", 
+        action="store_true",
+        help="Check memory requirements for each category"
+    )
+    parser.add_argument(
+        "--safety-margin", 
+        type=float, 
+        default=2.0,
+        help="Memory safety margin in GB (default: 2.0)"
+    )
+    return parser.parse_args()
+
+def cleanup_old_files():
+    """Remove old result files from the main directory"""
+    old_files = [
+        "benchmark_results.csv",
+        "benchmark_report.html"
+    ]
+    
+    # Remove old output files
+    for file in Path(".").glob("output_*.txt"):
+        if file.exists():
+            file.unlink()
+            print(f"🗑️  Removed old file: {file}")
+    
+    # Remove old CSV and HTML files
+    for file in old_files:
+        if Path(file).exists():
+            Path(file).unlink()
+            print(f"🗑️  Removed old file: {file}")
+
+def list_models_by_category():
+    """List all available models organized by category"""
+    print("\n📋 Available Models by Category:")
+    print("=" * 60)
+    
+    for category, config in MODEL_CONFIG.items():
+        memory_req = config["memory_limit_gb"]
+        available = get_available_memory_gb()
+        can_run = can_run_model(category)
+        status = "✅ CAN RUN" if can_run else "❌ INSUFFICIENT MEMORY"
+        
+        print(f"\n📂 {category.upper()} ({memory_req}GB required) - {status}")
+        print(f"   Available: {available:.1f}GB")
+        print("-" * 50)
+        
+        for i, (model_name, params) in enumerate(config["models"], 1):
+            print(f"   {i}. {model_name}")
+            if params:
+                print(f"      Params: {params}")
+    
+    print("\n" + "=" * 60)
+
+def check_memory_requirements():
+    """Check memory requirements for all categories"""
+    print("\n💾 Memory Requirements Analysis:")
+    print("=" * 60)
+    
+    total_memory_gb = psutil.virtual_memory().total / (1024**3)
+    available_gb = get_available_memory_gb()
+    
+    print(f"Total System Memory: {total_memory_gb:.1f}GB")
+    print(f"Available Memory: {available_gb:.1f}GB")
+    print(f"Safety Margin: {MEMORY_SAFETY_MARGIN_GB:.1f}GB")
+    print(f"Usable Memory: {available_gb - MEMORY_SAFETY_MARGIN_GB:.1f}GB")
+    
+    print("\nCategory Analysis:")
+    print("-" * 50)
+    
+    for category, config in MODEL_CONFIG.items():
+        required_gb = config["memory_limit_gb"]
+        total_needed = required_gb + MEMORY_SAFETY_MARGIN_GB
+        can_run = can_run_model(category)
+        
+        status = "✅ YES" if can_run else "❌ NO"
+        print(f"{category:12} | Req: {required_gb:4.1f}GB | Total: {total_needed:4.1f}GB | Can Run: {status}")
+    
+    print("\n" + "=" * 60)
 
 # Configuration
 SYSTEM_PROMPT = """You are PromptCraft Architect, an AI specializing in refactoring user inputs into precise, structured, plain-text prompts for other advanced LLMs. Your focus is on a wide range of technical tasks for developers, from creating entire applications to fixing small bugs.
@@ -95,16 +191,46 @@ GOAL: Create a functional React application that mimics key features of Facebook
 
 MAX_NEW_TOKENS = 800  # Allow full technical responses for complex prompts
 
-# MLX Community model configurations: (model_name, special_params)
-# No need for manual chat templates - MLX models have built-in templates
-MODELS = [
-    ("mlx-community/Phi-3-mini-4k-instruct-4bit", {"repetition_penalty": 1.1}),
-    ("mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit", {}),
-    ("mlx-community/Meta-Llama-3-8B-Instruct-4bit", {}),
-    # Add any MLX model without worrying about chat templates!
-    ("mlx-community/Qwen2-1.5B-Instruct-4bit", {}),
-    ("mlx-community/Mistral-7B-Instruct-v0.3-4bit", {}),
-]
+# Model configuration with memory-aware organization
+MODEL_CONFIG = {
+    "small": {
+        "memory_limit_gb": 2.0,
+        "models": [
+            # ("mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-8bit", {}), poor output
+        ]
+    },
+    "medium": {
+        "memory_limit_gb": 4.0,
+        "models": [
+            ("mlx-community/Mistral-7B-Instruct-v0.3-4bit", {}),
+            ("mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", {}),
+            ("mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit", {}),
+            ("mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit", {}),
+        ]
+    },
+    "large": {
+        "memory_limit_gb": 6.0,
+        "models": [
+            ("mlx-community/gemma-2-9b-it-4bit", {}),
+            ("mlx-community/Qwen3-8B-4bit", {}),
+            ("mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit", {}),
+            ("mlx-community/DeepSeek-R1-0528-Qwen3-8B-4bit", {}),
+        ]
+    },
+    "experimental": {
+        "memory_limit_gb": 5.0,
+        "models": [
+            ("mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx", {}),
+            ("mlx-community/DeepSeek-R1-0528-Qwen3-8B-4bit-DWQ", {}),
+        ]
+    }
+}
+
+# Runtime configuration
+MEMORY_SAFETY_MARGIN_GB = 2.0  # Keep 2GB free for system
+MAX_CONCURRENT_MODELS = 1  # Process one model at a time
+SKIP_ON_MEMORY_ERROR = True  # Skip models that fail due to memory
+CATEGORIES_TO_RUN = ["small", "medium"]  # Which categories to run by default
 
 def install_dependencies():
     """Install required dependencies if not available"""
@@ -152,10 +278,45 @@ def get_memory_usage() -> float:
     """Get current memory usage in MB"""
     return psutil.Process().memory_info().rss / 1024 / 1024
 
+def get_available_memory_gb() -> float:
+    """Get available system memory in GB"""
+    return psutil.virtual_memory().available / (1024**3)
+
+def can_run_model(category: str) -> bool:
+    """Check if we have enough memory to run models in this category"""
+    available_gb = get_available_memory_gb()
+    required_gb = MODEL_CONFIG[category]["memory_limit_gb"]
+    return available_gb >= (required_gb + MEMORY_SAFETY_MARGIN_GB)
+
+def get_models_to_run() -> List[Tuple[str, str, Dict]]:
+    """Get list of models to run based on memory constraints and configuration"""
+    models_to_run = []
+    
+    for category in CATEGORIES_TO_RUN:
+        if category not in MODEL_CONFIG:
+            print(f"⚠️  Category '{category}' not found in configuration")
+            continue
+            
+        if not can_run_model(category):
+            available = get_available_memory_gb()
+            required = MODEL_CONFIG[category]["memory_limit_gb"] + MEMORY_SAFETY_MARGIN_GB
+            print(f"⚠️  Skipping '{category}' category - need {required:.1f}GB, have {available:.1f}GB")
+            continue
+            
+        print(f"✅ Category '{category}' approved - {len(MODEL_CONFIG[category]['models'])} models")
+        
+        for model_name, special_params in MODEL_CONFIG[category]["models"]:
+            models_to_run.append((category, model_name, special_params))
+    
+    return models_to_run
+
 def clear_memory():
     """Clear memory and force garbage collection"""
     gc.collect()
     # MLX automatically manages memory on Apple Silicon
+    
+    # Force additional cleanup
+    mx.clear_cache()  # Clear MLX cache
 
 def compute_similarity(text1: str, text2: str, model: SentenceTransformer) -> float:
     """Compute cosine similarity between two texts"""
@@ -425,10 +586,33 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
 
 def main():
     """Main benchmarking function"""
+    global MEMORY_SAFETY_MARGIN_GB, CATEGORIES_TO_RUN
+    
+    # Parse command line arguments
+    args = parse_arguments()
+    
+    # Update global configuration based on arguments
+    MEMORY_SAFETY_MARGIN_GB = args.safety_margin
+    
+    if "all" in args.categories:
+        CATEGORIES_TO_RUN = list(MODEL_CONFIG.keys())
+    else:
+        CATEGORIES_TO_RUN = args.categories
+    
     print("🚀 Starting MLX LLM Benchmarking on MacBook M1 Pro")
     print("🍎 Using MLX (Apple Silicon optimized)")
     print(f"Total Memory: {psutil.virtual_memory().total / (1024**3):.1f} GB")
     print(f"Available Memory: {psutil.virtual_memory().available / (1024**3):.1f} GB")
+    print(f"Selected Categories: {', '.join(CATEGORIES_TO_RUN)}")
+    
+    # Handle utility commands
+    if args.list_models:
+        list_models_by_category()
+        return
+        
+    if args.memory_check:
+        check_memory_requirements()
+        return
     
     # Initialize similarity model
     print("\nLoading similarity model...")
@@ -439,11 +623,24 @@ def main():
         print(f"❌ Failed to load similarity model: {e}")
         similarity_model = None
     
+    # Get models to run based on memory constraints
+    models_to_run = get_models_to_run()
+    
+    if not models_to_run:
+        print("❌ No models can be run with current memory constraints")
+        return
+    
+    print(f"📋 Planning to run {len(models_to_run)} models")
+    
     # Run benchmarks
     all_results = []
     
-    for i, (model_name, special_params) in enumerate(MODELS, 1):
-        print(f"\n[{i}/{len(MODELS)}] Starting benchmark...")
+    for i, (category, model_name, special_params) in enumerate(models_to_run, 1):
+        print(f"\n[{i}/{len(models_to_run)}] Starting benchmark...")
+        print(f"📂 Category: {category}")
+        print(f"🔍 Model: {model_name}")
+        print(f"💾 Available memory: {get_available_memory_gb():.1f}GB")
+        
         results = benchmark_model(model_name, special_params, similarity_model)
         all_results.append(results)
         
@@ -454,6 +651,10 @@ def main():
                   f"Memory: {results['peak_memory_mb']:.1f}MB")
         else:
             print(f"❌ {model_name}: {results['error']}")
+            
+        # Force cleanup between models
+        clear_memory()
+        time.sleep(1)  # Brief pause to let system stabilize
     
     # Create DataFrame and save results
     df = pd.DataFrame(all_results)
