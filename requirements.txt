@@ -1,0 +1,6 @@
+mlx-lm>=0.11.0
+sentence-transformers>=2.2.0
+pandas>=2.0.0
+numpy>=1.24.0
+psutil>=5.9.0
+tqdm>=4.65.0 
