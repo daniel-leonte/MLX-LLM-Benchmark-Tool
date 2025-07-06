@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
 import numpy as np
+import json
 
 # Set environment variables for optimal performance
 os.environ["OMP_NUM_THREADS"] = "4"
@@ -28,6 +29,10 @@ warnings.filterwarnings("ignore")
 # Create results directory
 RESULTS_DIR = Path("results")
 RESULTS_DIR.mkdir(exist_ok=True)
+
+# Results persistence configuration
+RESULTS_DATABASE = RESULTS_DIR / "benchmark_history.json"
+APPEND_RESULTS = True  # Set to False to overwrite instead of append
 
 def parse_arguments():
     """Parse command line arguments"""
@@ -54,6 +59,11 @@ def parse_arguments():
         type=float, 
         default=2.0,
         help="Memory safety margin in GB (default: 2.0)"
+    )
+    parser.add_argument(
+        "--overwrite", 
+        action="store_true",
+        help="Overwrite existing results instead of appending (default: append)"
     )
     return parser.parse_args()
 
@@ -489,8 +499,84 @@ def benchmark_model(model_name: str, special_params: Dict[str, Any], similarity_
     
     return results
 
+def load_existing_results() -> List[Dict[str, Any]]:
+    """Load existing benchmark results from JSON database"""
+    if not RESULTS_DATABASE.exists():
+        return []
+    
+    try:
+        with open(RESULTS_DATABASE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            print(f"📖 Loaded {len(data)} existing benchmark results")
+            return data
+    except Exception as e:
+        print(f"⚠️  Error loading existing results: {e}")
+        return []
+
+def save_results_database(results: List[Dict[str, Any]]) -> None:
+    """Save benchmark results to JSON database"""
+    try:
+        with open(RESULTS_DATABASE, 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=2, default=str)
+        print(f"💾 Saved {len(results)} results to database")
+    except Exception as e:
+        print(f"❌ Error saving results database: {e}")
+
+def add_run_metadata(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Add run metadata to distinguish between different benchmark sessions"""
+    import datetime
+    
+    timestamp = datetime.datetime.now().isoformat()
+    run_id = timestamp.replace(':', '-').replace('.', '-')  # Safe filename
+    
+    for result in results:
+        result['run_timestamp'] = timestamp
+        result['run_id'] = run_id
+    
+    return results
+
+def merge_results(existing_results: List[Dict[str, Any]], new_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge new results with existing ones, handling duplicates intelligently"""
+    if not APPEND_RESULTS:
+        print("🔄 Overwrite mode: replacing all existing results")
+        return new_results
+    
+    if not existing_results:
+        print("✨ No existing results found, starting fresh")
+        return new_results
+    
+    # Create a set of existing model names for deduplication
+    existing_models = {(r['model_name'], r.get('run_id', '')) for r in existing_results}
+    
+    # Add new results, avoiding duplicates from the same run
+    merged_results = existing_results.copy()
+    new_count = 0
+    
+    for result in new_results:
+        model_key = (result['model_name'], result.get('run_id', ''))
+        if model_key not in existing_models:
+            merged_results.append(result)
+            new_count += 1
+        else:
+            print(f"⚠️  Skipping duplicate: {result['model_name']} from same run")
+    
+    print(f"🔗 Merged results: {len(existing_results)} existing + {new_count} new = {len(merged_results)} total")
+    return merged_results
+
 def generate_html_report(df: pd.DataFrame, output_files: List[str]):
     """Generate an HTML report with full outputs"""
+    
+    # Group results by run for better organization
+    runs_info = {}
+    if 'run_timestamp' in df.columns:
+        for _, row in df.iterrows():
+            run_id = row.get('run_id', 'unknown')
+            if run_id not in runs_info:
+                runs_info[run_id] = {
+                    'timestamp': row.get('run_timestamp', 'Unknown'),
+                    'count': 0
+                }
+            runs_info[run_id]['count'] += 1
     
     # Create HTML header with embedded CSS
     html_content = f"""<!DOCTYPE html>
@@ -500,8 +586,11 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; }}
         .header {{ background-color: #f0f0f0; padding: 20px; border-radius: 5px; }}
+        .runs-info {{ background-color: #e8f5e8; padding: 15px; margin: 15px 0; border-radius: 5px; }}
+        .run-badge {{ display: inline-block; background: #4CAF50; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8em; margin: 2px; }}
         .model-section {{ margin: 30px 0; border: 1px solid #ddd; border-radius: 5px; position: relative; }}
         .model-header {{ background-color: #e8f4f8; padding: 15px; font-weight: bold; position: relative; }}
+        .run-info {{ font-size: 0.8em; color: #666; margin-top: 5px; }}
         .remove-btn {{ 
             position: absolute; 
             top: 10px; 
@@ -546,7 +635,7 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
         .metric-label {{ font-size: 0.9em; color: #666; }}
         .output {{ padding: 20px; font-family: monospace; background-color: #f8f8f8; 
                  white-space: pre-wrap; border-top: 1px solid #ddd; }}
-        .summary-table {{ width: 100%%; border-collapse: collapse; margin: 20px 0; }}
+        .summary-table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
         .summary-table th, .summary-table td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
         .summary-table th {{ background-color: #f2f2f2; }}
         .summary-table tr.model-row {{ transition: all 0.3s ease-in-out; }}
@@ -574,6 +663,21 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
         <p><strong>System Prompt:</strong> PromptCraft Architect (Technical Prompt Refinement)</p>
     </div>
     
+    <div class="runs-info">
+        <h3>📊 Benchmark Runs Summary</h3>
+        <p><strong>Total Results:</strong> {len(df)} models across {len(runs_info)} run(s)</p>
+"""
+    
+    if runs_info:
+        html_content += "<p><strong>Runs:</strong> "
+        for run_id, info in runs_info.items():
+            timestamp = info['timestamp'][:19] if len(info['timestamp']) > 19 else info['timestamp']  # Truncate milliseconds
+            html_content += f'<span class="run-badge">{timestamp} ({info["count"]} models)</span>'
+        html_content += "</p>"
+    
+    html_content += """
+    </div>
+    
     <div class="removed-notice" id="removedNotice">
         <strong>Model removed.</strong> <a href="#" id="undoRemove" style="color: #856404; text-decoration: underline;">Undo</a>
     </div>
@@ -588,6 +692,7 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
                 <th>Memory (MB)</th>
                 <th>Tokens/sec</th>
                 <th>Similarity Score</th>
+                <th>Run Date</th>
                 <th>Error</th>
                 <th>Action</th>
             </tr>
@@ -598,6 +703,8 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
     # Generate table rows manually for better control
     for idx, (_, row) in enumerate(df.iterrows()):
         error_display = row.get('error', '') if not pd.isna(row.get('error', '')) else ''
+        run_date = row.get('run_timestamp', 'Unknown')[:19] if pd.notna(row.get('run_timestamp', '')) else 'Unknown'
+        
         html_content += f"""
             <tr class="model-row" id="table-row-{idx}">
                 <td>{row['model_name']}</td>
@@ -606,6 +713,7 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
                 <td>{row['peak_memory_mb']:.1f}</td>
                 <td>{row['tokens_per_sec']:.2f}</td>
                 <td>{row['similarity_score']:.3f}</td>
+                <td>{run_date}</td>
                 <td>{error_display}</td>
                 <td>
                     <button class="table-remove-btn" onclick="removeModel('{idx}', '{row['model_name']}')" title="Remove this model result">×</button>
@@ -623,6 +731,8 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
     # Add detailed sections for each model
     for idx, (_, row) in enumerate(df.iterrows()):
         output_file = row.get('output_file', '')
+        run_date = row.get('run_timestamp', 'Unknown')[:19] if pd.notna(row.get('run_timestamp', '')) else 'Unknown'
+        
         # Handle NaN values (pandas converts None to NaN which is a float)
         if pd.isna(output_file):
             output_file = ''
@@ -640,6 +750,7 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
     <div class="model-section" id="model-{idx}">
         <div class="model-header">
             {row['model_name']}
+            <div class="run-info">Run: {run_date}</div>
             <button class="remove-btn" onclick="removeModel('{idx}', '{row['model_name']}')" title="Remove this model result">×</button>
         </div>
         <div class="metrics">
@@ -786,13 +897,14 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
 
 def main():
     """Main benchmarking function"""
-    global MEMORY_SAFETY_MARGIN_GB, CATEGORIES_TO_RUN
+    global MEMORY_SAFETY_MARGIN_GB, CATEGORIES_TO_RUN, APPEND_RESULTS
     
     # Parse command line arguments
     args = parse_arguments()
     
     # Update global configuration based on arguments
     MEMORY_SAFETY_MARGIN_GB = args.safety_margin
+    APPEND_RESULTS = not args.overwrite  # Invert the flag
     
     if "all" in args.categories:
         CATEGORIES_TO_RUN = list(MODEL_CONFIG.keys())
@@ -856,8 +968,18 @@ def main():
         clear_memory()
         time.sleep(1)  # Brief pause to let system stabilize
     
-    # Create DataFrame and save results
-    df = pd.DataFrame(all_results)
+    # Add run metadata to new results
+    all_results = add_run_metadata(all_results)
+    
+    # Load existing results and merge with new ones
+    existing_results = load_existing_results()
+    merged_results = merge_results(existing_results, all_results)
+    
+    # Save merged results to database
+    save_results_database(merged_results)
+    
+    # Create DataFrame from merged results
+    df = pd.DataFrame(merged_results)
     
     # Display results
     print("\n" + "="*100)
@@ -869,51 +991,72 @@ def main():
     pd.set_option('display.width', None)
     pd.set_option('display.max_colwidth', 30)
     
-    # Create a summary table for display
+    # Create a summary table for display (show recent results first)
     display_columns = [
         'model_name', 'framework', 'load_time', 
-        'peak_memory_mb', 'tokens_per_sec', 'similarity_score', 'error'
+        'peak_memory_mb', 'tokens_per_sec', 'similarity_score', 'run_timestamp', 'error'
     ]
     
-    display_df = df[display_columns].copy()
-    display_df['load_time'] = display_df['load_time'].round(2)
-    display_df['peak_memory_mb'] = display_df['peak_memory_mb'].round(1)
-    display_df['tokens_per_sec'] = display_df['tokens_per_sec'].round(2)
-    display_df['similarity_score'] = display_df['similarity_score'].round(3)
+    # Filter to show columns that exist in the DataFrame
+    existing_columns = [col for col in display_columns if col in df.columns]
+    display_df = df[existing_columns].copy()
+    
+    # Sort by run_timestamp descending to show newest results first
+    if 'run_timestamp' in display_df.columns:
+        display_df = display_df.sort_values('run_timestamp', ascending=False)
+    
+    # Round numeric columns
+    for col in ['load_time', 'peak_memory_mb', 'tokens_per_sec', 'similarity_score']:
+        if col in display_df.columns:
+            display_df[col] = display_df[col].round(2)
     
     print(display_df.to_string(index=False))
     
-    # Save to CSV
+    # Save to CSV (complete history)
     output_file = RESULTS_DIR / "benchmark_results.csv"
     df.to_csv(output_file, index=False)
-    print(f"\n📊 Results saved to {output_file}")
+    print(f"\n📊 Complete results saved to {output_file}")
     
-    # Generate HTML report
+    # Generate HTML report with all results
     output_files = [row.get('output_file', '') if not pd.isna(row.get('output_file', '')) else '' for _, row in df.iterrows()]
     generate_html_report(df, output_files)
     
     # Summary statistics
     successful_runs = df[df['error'].isna()]
+    current_run_results = [r for r in all_results if r.get('error') is None]
+    
     if not successful_runs.empty:
         print(f"\n📈 SUMMARY:")
-        print(f"Successful runs: {len(successful_runs)}/{len(df)}")
-        print(f"Average tokens/sec: {successful_runs['tokens_per_sec'].mean():.2f}")
+        print(f"Total successful runs: {len(successful_runs)}/{len(df)} (all time)")
+        print(f"Current session: {len(current_run_results)}/{len(all_results)} successful")
+        
+        if len(current_run_results) > 0:
+            current_tokens_per_sec = [r['tokens_per_sec'] for r in current_run_results]
+            print(f"Current session avg tokens/sec: {sum(current_tokens_per_sec)/len(current_tokens_per_sec):.2f}")
+        
+        print(f"All-time average tokens/sec: {successful_runs['tokens_per_sec'].mean():.2f}")
         
         best_model = successful_runs.loc[successful_runs['tokens_per_sec'].idxmax()]
-        print(f"Best performing: {best_model['model_name']} ({best_model['tokens_per_sec']:.2f} tokens/sec)")
+        print(f"Best performing (all-time): {best_model['model_name']} ({best_model['tokens_per_sec']:.2f} tokens/sec)")
         
-        print(f"Average load time: {successful_runs['load_time'].mean():.2f}s")
-        print(f"Average memory usage: {successful_runs['peak_memory_mb'].mean():.1f}MB")
+        print(f"All-time average load time: {successful_runs['load_time'].mean():.2f}s")
+        print(f"All-time average memory usage: {successful_runs['peak_memory_mb'].mean():.1f}MB")
         
-        if similarity_model:
-            print(f"Average similarity: {successful_runs['similarity_score'].mean():.3f}")
+        if similarity_model and len(successful_runs) > 0:
+            print(f"All-time average similarity: {successful_runs['similarity_score'].mean():.3f}")
     else:
         print("\n❌ No successful benchmark runs completed")
     
     print(f"\n🏁 Benchmarking complete!")
     print(f"📊 CSV: {output_file}")
     print(f"🌐 HTML Report: {RESULTS_DIR / 'benchmark_report.html'}")
+    print(f"🗄️  Database: {RESULTS_DATABASE}")
     print(f"📝 Individual outputs: {RESULTS_DIR / 'output_*.txt'} files")
+    
+    if APPEND_RESULTS:
+        print(f"\n💡 Tip: Use --overwrite to replace existing results instead of appending")
+    else:
+        print(f"\n💡 Tip: Remove --overwrite to append to existing results")
 
 if __name__ == "__main__":
     main() 
