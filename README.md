@@ -15,7 +15,7 @@ python benchmark.py
 python benchmark.py --serve
 ```
 
-![Benchmark Results Example](image.png)
+![Benchmark Results Example](images/image.png)
 *Interactive benchmark report showing model performance metrics, detailed outputs, and removal capabilities*
 
 ## 📋 Essential Commands
