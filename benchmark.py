@@ -17,6 +17,10 @@ from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
 import numpy as np
 import json
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+import threading
+import webbrowser
 
 # Set environment variables for optimal performance
 os.environ["OMP_NUM_THREADS"] = "4"
@@ -64,6 +68,17 @@ def parse_arguments():
         "--overwrite", 
         action="store_true",
         help="Overwrite existing results instead of appending (default: append)"
+    )
+    parser.add_argument(
+        "--serve", 
+        action="store_true",
+        help="Start web server to view interactive report (enables persistent deletion)"
+    )
+    parser.add_argument(
+        "--port", 
+        type=int, 
+        default=8000,
+        help="Port for web server (default: 8000, used with --serve)"
     )
     return parser.parse_args()
 
@@ -522,6 +537,40 @@ def save_results_database(results: List[Dict[str, Any]]) -> None:
     except Exception as e:
         print(f"❌ Error saving results database: {e}")
 
+def remove_result_from_database(model_name: str, run_id: str) -> bool:
+    """Remove a specific result from the JSON database"""
+    try:
+        results = load_existing_results()
+        
+        # Find and remove the matching result
+        original_count = len(results)
+        results = [r for r in results if not (r.get('model_name') == model_name and r.get('run_id') == run_id)]
+        
+        if len(results) < original_count:
+            save_results_database(results)
+            print(f"🗑️  Removed {model_name} (run: {run_id}) from database")
+            return True
+        else:
+            print(f"⚠️  No matching result found for {model_name} (run: {run_id})")
+            return False
+    except Exception as e:
+        print(f"❌ Error removing result from database: {e}")
+        return False
+
+def regenerate_html_report() -> None:
+    """Regenerate the HTML report from the current database"""
+    try:
+        results = load_existing_results()
+        if results:
+            df = pd.DataFrame(results)
+            output_files = [r.get('output_file', '') for r in results]
+            generate_html_report(df, output_files)
+            print("🔄 HTML report regenerated")
+        else:
+            print("⚠️  No results to regenerate HTML report")
+    except Exception as e:
+        print(f"❌ Error regenerating HTML report: {e}")
+
 def add_run_metadata(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Add run metadata to distinguish between different benchmark sessions"""
     import datetime
@@ -648,6 +697,21 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
             border-radius: 5px; 
             display: none; 
         }}
+        .removed-notice.success {{
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }}
+        .removed-notice.error {{
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }}
+        .removed-notice.warning {{
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+            color: #856404;
+        }}
         .fade-out {{ 
             opacity: 0; 
             transform: translateX(100%); 
@@ -704,9 +768,10 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
     for idx, (_, row) in enumerate(df.iterrows()):
         error_display = row.get('error', '') if not pd.isna(row.get('error', '')) else ''
         run_date = row.get('run_timestamp', 'Unknown')[:19] if pd.notna(row.get('run_timestamp', '')) else 'Unknown'
+        run_id = row.get('run_id', 'unknown')
         
         html_content += f"""
-            <tr class="model-row" id="table-row-{idx}">
+            <tr class="model-row" id="table-row-{idx}" data-model-name="{row['model_name']}" data-run-id="{run_id}">
                 <td>{row['model_name']}</td>
                 <td>{row['framework']}</td>
                 <td>{row['load_time']:.2f}</td>
@@ -716,7 +781,7 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
                 <td>{run_date}</td>
                 <td>{error_display}</td>
                 <td>
-                    <button class="table-remove-btn" onclick="removeModel('{idx}', '{row['model_name']}')" title="Remove this model result">×</button>
+                    <button class="table-remove-btn" onclick="removeModel('{idx}', '{row['model_name']}', '{run_id}')" title="Remove this model result">×</button>
                 </td>
             </tr>
 """
@@ -732,6 +797,7 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
     for idx, (_, row) in enumerate(df.iterrows()):
         output_file = row.get('output_file', '')
         run_date = row.get('run_timestamp', 'Unknown')[:19] if pd.notna(row.get('run_timestamp', '')) else 'Unknown'
+        run_id = row.get('run_id', 'unknown')
         
         # Handle NaN values (pandas converts None to NaN which is a float)
         if pd.isna(output_file):
@@ -747,11 +813,11 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
                         response = content
                 
                 html_content += f"""
-    <div class="model-section" id="model-{idx}">
+    <div class="model-section" id="model-{idx}" data-model-name="{row['model_name']}" data-run-id="{run_id}">
         <div class="model-header">
             {row['model_name']}
             <div class="run-info">Run: {run_date}</div>
-            <button class="remove-btn" onclick="removeModel('{idx}', '{row['model_name']}')" title="Remove this model result">×</button>
+            <button class="remove-btn" onclick="removeModel('{idx}', '{row['model_name']}', '{run_id}')" title="Remove this model result">×</button>
         </div>
         <div class="metrics">
             <div class="metric">
@@ -784,22 +850,82 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
     # Add JavaScript code using regular string concatenation to avoid f-string issues
     html_content += """
     <script>
-        let lastRemovedElements = { tableRow: null, modelSection: null };
-        let lastRemovedModelName = '';
-        let lastRemovedIndex = '';
+        let isServerMode = window.location.protocol === 'http:';
+        let pendingDeletions = [];
         
-        function removeModel(modelId, modelName) {
+        function removeModel(modelId, modelName, runId) {
+            if (isServerMode) {
+                // Server mode: Send DELETE request to permanently remove from database
+                removeModelFromServer(modelId, modelName, runId);
+            } else {
+                // Static mode: Just hide elements (original behavior)
+                removeModelLocally(modelId, modelName, runId);
+            }
+        }
+        
+        function removeModelFromServer(modelId, modelName, runId) {
             const modelElement = document.getElementById('model-' + modelId);
             const tableRow = document.getElementById('table-row-' + modelId);
             const removedNotice = document.getElementById('removedNotice');
             
-            // Store references for potential undo
-            lastRemovedElements.modelSection = modelElement ? modelElement.cloneNode(true) : null;
-            lastRemovedElements.tableRow = tableRow ? tableRow.cloneNode(true) : null;
-            lastRemovedModelName = modelName;
-            lastRemovedIndex = modelId;
+            // Show loading state
+            if (modelElement) {
+                modelElement.style.opacity = '0.5';
+            }
+            if (tableRow) {
+                tableRow.style.opacity = '0.5';
+            }
             
-            // Add fade-out animation and remove both elements
+            // Send DELETE request to server
+            const url = '/api/remove-result?model_name=' + encodeURIComponent(modelName) + '&run_id=' + encodeURIComponent(runId);
+            
+            fetch(url, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    throw new Error('Failed to remove result from server');
+                }
+            })
+            .then(data => {
+                // Success: The server will regenerate the HTML, so we reload the page
+                showNotification('Model "' + modelName + '" permanently removed from database. Reloading...', 'success');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            })
+            .catch(error => {
+                console.error('Error removing model:', error);
+                
+                // Restore opacity
+                if (modelElement) {
+                    modelElement.style.opacity = '1';
+                }
+                if (tableRow) {
+                    tableRow.style.opacity = '1';
+                }
+                
+                showNotification('Error removing model: ' + error.message, 'error');
+            });
+        }
+        
+        function removeModelLocally(modelId, modelName, runId) {
+            // Original local removal behavior for static files
+            const modelElement = document.getElementById('model-' + modelId);
+            const tableRow = document.getElementById('table-row-' + modelId);
+            
+            // Store for potential undo
+            let lastRemovedElements = { 
+                tableRow: tableRow ? tableRow.cloneNode(true) : null,
+                modelSection: modelElement ? modelElement.cloneNode(true) : null 
+            };
+            
+            // Add fade-out animation
             if (modelElement) {
                 modelElement.classList.add('fade-out');
             }
@@ -816,74 +942,52 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
                     tableRow.remove();
                 }
                 
-                // Show undo notice
-                removedNotice.style.display = 'block';
-                removedNotice.innerHTML = '<strong>Model "' + modelName + '" removed from both sections.</strong> <a href="#" onclick="undoRemove()" style="color: #856404; text-decoration: underline;">Undo</a>';
-                
-                // Auto-hide notice after 10 seconds
-                setTimeout(() => {
-                    removedNotice.style.display = 'none';
-                }, 10000);
+                showNotification('Model "' + modelName + '" removed locally (not from database). <a href="#" onclick="undoLocalRemove()">Undo</a>', 'warning');
             }, 300);
         }
         
-        function undoRemove() {
+        function showNotification(message, type = 'info') {
             const removedNotice = document.getElementById('removedNotice');
-            const detailedOutputsSection = document.querySelector('h2:nth-of-type(2)');
-            const summaryTableBody = document.querySelector('.summary-table tbody');
+            removedNotice.className = 'removed-notice ' + type;
+            removedNotice.innerHTML = '<strong>' + message + '</strong>';
+            removedNotice.style.display = 'block';
             
-            // Restore table row
-            if (lastRemovedElements.tableRow && summaryTableBody) {
-                // Find the correct position to insert the row back
-                const allRows = summaryTableBody.querySelectorAll('tr');
-                const targetIndex = parseInt(lastRemovedIndex);
-                
-                if (targetIndex < allRows.length) {
-                    summaryTableBody.insertBefore(lastRemovedElements.tableRow, allRows[targetIndex]);
-                } else {
-                    summaryTableBody.appendChild(lastRemovedElements.tableRow);
-                }
-                
-                // Remove fade-out class
-                lastRemovedElements.tableRow.classList.remove('fade-out');
-            }
-            
-            // Restore model section
-            if (lastRemovedElements.modelSection && detailedOutputsSection) {
-                // Find the correct position to insert the section back
-                const allSections = document.querySelectorAll('.model-section');
-                const targetIndex = parseInt(lastRemovedIndex);
-                
-                if (targetIndex < allSections.length) {
-                    detailedOutputsSection.parentNode.insertBefore(lastRemovedElements.modelSection, allSections[targetIndex]);
-                } else {
-                    detailedOutputsSection.parentNode.appendChild(lastRemovedElements.modelSection);
-                }
-                
-                // Remove fade-out class
-                lastRemovedElements.modelSection.classList.remove('fade-out');
-            }
-            
-            // Hide notice
-            removedNotice.style.display = 'none';
-            
-            // Clear stored references
-            lastRemovedElements = { tableRow: null, modelSection: null };
-            lastRemovedModelName = '';
-            lastRemovedIndex = '';
+            // Auto-hide after 10 seconds
+            setTimeout(() => {
+                removedNotice.style.display = 'none';
+            }, 10000);
+        }
+        
+        function undoLocalRemove() {
+            // This would be more complex to implement properly
+            // For now, just suggest reloading the page
+            showNotification('To restore locally removed items, please reload the page.', 'info');
         }
         
         // Hide notice when clicking anywhere else
         document.addEventListener('click', function(event) {
             const removedNotice = document.getElementById('removedNotice');
-            const undoLink = removedNotice.querySelector('a');
+            const isClickOnNotice = removedNotice.contains(event.target);
             
-            if (event.target !== undoLink && removedNotice.style.display === 'block') {
+            if (!isClickOnNotice && removedNotice.style.display === 'block') {
                 setTimeout(() => {
                     removedNotice.style.display = 'none';
                 }, 100);
             }
         });
+        
+        // Show server mode indicator
+        if (isServerMode) {
+            document.addEventListener('DOMContentLoaded', function() {
+                const header = document.querySelector('.header');
+                if (header) {
+                    const serverBadge = document.createElement('div');
+                    serverBadge.innerHTML = '🌐 <strong>Server Mode:</strong> Deletions are permanent and saved to database';
+                    serverBadge.style.cssText = 'background: #e8f5e8; border: 1px solid #4CAF50; padding: 8px; margin: 10px 0; border-radius: 4px; font-size: 0.9em;';
+                    header.appendChild(serverBadge);
+                }
+            });
+        }
     </script>
 </body>
 </html>
@@ -924,6 +1028,18 @@ def main():
         
     if args.memory_check:
         check_memory_requirements()
+        return
+    
+    if args.serve:
+        # Start web server mode
+        html_file = RESULTS_DIR / "benchmark_report.html"
+        if not html_file.exists():
+            print("⚠️  No HTML report found. Run benchmarks first to generate a report.")
+            print("Example: python benchmark.py --categories medium")
+            return
+        
+        print(f"🌐 Starting web server mode...")
+        start_benchmark_server(args.port)
         return
     
     # Initialize similarity model
@@ -1053,10 +1169,99 @@ def main():
     print(f"🗄️  Database: {RESULTS_DATABASE}")
     print(f"📝 Individual outputs: {RESULTS_DIR / 'output_*.txt'} files")
     
+    print(f"\n🌟 Interactive Mode:")
+    print(f"   Run: python benchmark.py --serve")
+    print(f"   → Start web server for interactive report with persistent deletion")
+    print(f"   → Deletions will be saved to the database permanently")
+    
     if APPEND_RESULTS:
         print(f"\n💡 Tip: Use --overwrite to replace existing results instead of appending")
     else:
         print(f"\n💡 Tip: Remove --overwrite to append to existing results")
+
+class BenchmarkHTTPRequestHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for the benchmark server"""
+    
+    def log_message(self, format, *args):
+        """Override to reduce server log noise"""
+        return
+    
+    def do_GET(self):
+        """Handle GET requests"""
+        parsed_path = urlparse(self.path)
+        
+        if parsed_path.path == '/' or parsed_path.path == '/report':
+            # Serve the HTML report
+            html_file = RESULTS_DIR / "benchmark_report.html"
+            if html_file.exists():
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                with open(html_file, 'r', encoding='utf-8') as f:
+                    self.wfile.write(f.read().encode('utf-8'))
+            else:
+                self.send_error(404, "Report not found")
+        else:
+            self.send_error(404, "Not found")
+    
+    def do_DELETE(self):
+        """Handle DELETE requests to remove results"""
+        try:
+            # Parse query parameters
+            parsed_path = urlparse(self.path)
+            query_params = parse_qs(parsed_path.query)
+            
+            if parsed_path.path == '/api/remove-result':
+                model_name = query_params.get('model_name', [None])[0]
+                run_id = query_params.get('run_id', [None])[0]
+                
+                if model_name and run_id:
+                    success = remove_result_from_database(model_name, run_id)
+                    if success:
+                        # Regenerate HTML report
+                        regenerate_html_report()
+                        
+                        self.send_response(200)
+                        self.send_header('Content-type', 'application/json')
+                        self.end_headers()
+                        response = {'success': True, 'message': 'Result removed successfully'}
+                        self.wfile.write(json.dumps(response).encode('utf-8'))
+                    else:
+                        self.send_error(400, "Failed to remove result")
+                else:
+                    self.send_error(400, "Missing model_name or run_id")
+            else:
+                self.send_error(404, "Not found")
+        except Exception as e:
+            print(f"❌ Error processing DELETE request: {e}")
+            self.send_error(500, "Internal server error")
+    
+    def do_OPTIONS(self):
+        """Handle OPTIONS requests for CORS"""
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+def start_benchmark_server(port: int = 8000) -> None:
+    """Start the benchmark HTTP server"""
+    try:
+        server_address = ('', port)
+        httpd = HTTPServer(server_address, BenchmarkHTTPRequestHandler)
+        
+        print(f"🌐 Starting benchmark server on http://localhost:{port}")
+        print(f"📊 Access your report at: http://localhost:{port}/report")
+        print(f"🛑 Press Ctrl+C to stop the server")
+        
+        # Open browser automatically
+        webbrowser.open(f"http://localhost:{port}/report")
+        
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print(f"\n🛑 Server stopped")
+    except Exception as e:
+        print(f"❌ Error starting server: {e}")
 
 if __name__ == "__main__":
     main() 
