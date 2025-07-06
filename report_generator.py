@@ -95,6 +95,17 @@ class BenchmarkReportGenerator:
         
         return rows_html
     
+    def _generate_empty_state_row(self, df: pd.DataFrame) -> str:
+        """Generate empty state row when no results are available"""
+        if len(df) == 0:
+            return '''
+            <tr>
+                <td colspan="9" style="text-align: center; padding: 40px; color: #666; font-style: italic;">
+                    📭 No benchmark results found. Run some benchmarks to see results here!
+                </td>
+            </tr>'''
+        return ""
+    
     def _generate_detailed_sections(self, df: pd.DataFrame) -> str:
         """Generate HTML for detailed model sections"""
         sections_html = ""
@@ -154,6 +165,17 @@ class BenchmarkReportGenerator:
         
         return sections_html
     
+    def _generate_empty_state_details(self, df: pd.DataFrame) -> str:
+        """Generate empty state message for detailed sections when no results are available"""
+        if len(df) == 0:
+            return '''
+    <div style="text-align: center; padding: 60px; color: #666; background-color: #f9f9f9; border-radius: 8px; margin: 20px 0;">
+        <h3 style="color: #999; margin-bottom: 20px;">📭 No Detailed Results Available</h3>
+        <p style="font-size: 1.1em; margin-bottom: 15px;">All benchmark results have been removed.</p>
+        <p style="font-size: 0.9em; color: #888;">Run <code>python benchmark.py --categories medium</code> to generate new results.</p>
+    </div>'''
+        return ""
+    
     def _collect_runs_info(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Collect information about benchmark runs"""
         runs_info = {}
@@ -186,7 +208,9 @@ class BenchmarkReportGenerator:
             'RUNS_COUNT': str(len(runs_info)),
             'RUNS_BADGES': self._generate_runs_badges(runs_info),
             'RESULTS_TABLE_ROWS': self._generate_table_rows(df),
-            'DETAILED_SECTIONS': self._generate_detailed_sections(df)
+            'EMPTY_STATE_ROW': self._generate_empty_state_row(df),
+            'DETAILED_SECTIONS': self._generate_detailed_sections(df),
+            'EMPTY_STATE_DETAILS': self._generate_empty_state_details(df)
         }
         
         # Read HTML template

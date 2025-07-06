@@ -620,7 +620,10 @@ def regenerate_html_report() -> None:
             generate_html_report(df, output_files)
             print("🔄 HTML report regenerated")
         else:
-            print("⚠️  No results to regenerate HTML report")
+            # Create empty DataFrame for empty database
+            df = pd.DataFrame()
+            generate_html_report(df, [])
+            print("🔄 HTML report regenerated (empty database)")
     except Exception as e:
         print(f"❌ Error regenerating HTML report: {e}")
 
