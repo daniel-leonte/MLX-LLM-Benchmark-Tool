@@ -179,15 +179,31 @@ RESULTS_DIR.mkdir(exist_ok=True)
 RESULTS_DATABASE = RESULTS_DIR / "benchmark_history.json"
 APPEND_RESULTS = True  # Set to False to overwrite instead of append
 
-def parse_arguments():
-    """Parse command line arguments"""
+def parse_arguments_early():
+    """Early parse to get config file path only"""
+    parser = argparse.ArgumentParser(description="MLX LLM Benchmark Tool", add_help=False)
+    parser.add_argument(
+        "--config", 
+        type=str, 
+        default="config.yaml",
+        help="Path to configuration file (default: config.yaml)"
+    )
+    # Parse only known args to get config path, ignore everything else
+    args, _ = parser.parse_known_args()
+    return args.config
+
+def parse_arguments(available_categories: List[str]):
+    """Parse command line arguments with dynamic category choices"""
+    # Add 'all' to available categories for convenience
+    all_categories = available_categories + ["all"]
+    
     parser = argparse.ArgumentParser(description="MLX LLM Benchmark Tool")
     parser.add_argument(
         "--categories", 
         nargs="+", 
-        default=["small", "medium"],
-        choices=["small", "medium", "large", "experimental", "all"],
-        help="Model categories to run (default: small medium)"
+        default=["small", "medium"] if "small" in available_categories and "medium" in available_categories else available_categories[:2],
+        choices=all_categories,
+        help=f"Model categories to run. Available: {', '.join(available_categories)} (default: auto-detected)"
     )
     parser.add_argument(
         "--list-models", 
@@ -699,11 +715,16 @@ def main():
     """Main benchmarking function"""
     global MEMORY_SAFETY_MARGIN_GB, CATEGORIES_TO_RUN, APPEND_RESULTS
     
-    # Parse command line arguments
-    args = parse_arguments()
+    # Two-stage argument parsing:
+    # 1. Early parse to get config file path
+    config_path = parse_arguments_early()
     
-    # Load configuration from specified file
-    reload_configuration(args.config)
+    # 2. Load configuration to get available categories
+    reload_configuration(config_path)
+    
+    # 3. Parse arguments again with dynamic category choices
+    available_categories = list(MODEL_CONFIG.keys())
+    args = parse_arguments(available_categories)
     
     # Update global configuration based on arguments
     MEMORY_SAFETY_MARGIN_GB = args.safety_margin
