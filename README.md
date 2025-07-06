@@ -42,6 +42,9 @@ python benchmark.py --categories large
 
 # Adjust memory safety margin
 python benchmark.py --safety-margin 1.5
+
+# Ignore safety margin
+python benchmark.py --categories all --safety-margin -69
 ```
 
 ### Utility Commands

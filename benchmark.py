@@ -204,6 +204,7 @@ MODEL_CONFIG = {
         "models": [
             ("mlx-community/Mistral-7B-Instruct-v0.3-4bit", {}), # 1. this is the best model for this task
             # ("mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", {}),
+            ("mlx-community/Hermes-2-Pro-Mistral-7B-3bit", {}),
             # ("mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit", {}),
             # ("mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit", {}),
         ]
@@ -499,8 +500,46 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; }}
         .header {{ background-color: #f0f0f0; padding: 20px; border-radius: 5px; }}
-        .model-section {{ margin: 30px 0; border: 1px solid #ddd; border-radius: 5px; }}
-        .model-header {{ background-color: #e8f4f8; padding: 15px; font-weight: bold; }}
+        .model-section {{ margin: 30px 0; border: 1px solid #ddd; border-radius: 5px; position: relative; }}
+        .model-header {{ background-color: #e8f4f8; padding: 15px; font-weight: bold; position: relative; }}
+        .remove-btn {{ 
+            position: absolute; 
+            top: 10px; 
+            right: 10px; 
+            background: #ff4444; 
+            color: white; 
+            border: none; 
+            border-radius: 50%; 
+            width: 24px; 
+            height: 24px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            transition: background-color 0.2s;
+        }}
+        .remove-btn:hover {{ background: #cc0000; }}
+        .remove-btn:active {{ background: #990000; }}
+        .table-remove-btn {{
+            background: #ff4444; 
+            color: white; 
+            border: none; 
+            border-radius: 50%; 
+            width: 20px; 
+            height: 20px; 
+            font-size: 12px; 
+            cursor: pointer; 
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            transition: background-color 0.2s;
+            margin-left: 5px;
+        }}
+        .table-remove-btn:hover {{ background: #cc0000; }}
+        .table-remove-btn:active {{ background: #990000; }}
         .metrics {{ display: flex; gap: 20px; padding: 15px; background-color: #f9f9f9; }}
         .metric {{ text-align: center; }}
         .metric-value {{ font-size: 1.5em; font-weight: bold; color: #2196F3; }}
@@ -510,6 +549,21 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
         .summary-table {{ width: 100%%; border-collapse: collapse; margin: 20px 0; }}
         .summary-table th, .summary-table td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
         .summary-table th {{ background-color: #f2f2f2; }}
+        .summary-table tr.model-row {{ transition: all 0.3s ease-in-out; }}
+        .removed-notice {{ 
+            background-color: #fff3cd; 
+            border: 1px solid #ffeaa7; 
+            color: #856404; 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+            display: none; 
+        }}
+        .fade-out {{ 
+            opacity: 0; 
+            transform: translateX(100%); 
+            transition: all 0.3s ease-in-out; 
+        }}
     </style>
 </head>
 <body>
@@ -520,14 +574,54 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
         <p><strong>System Prompt:</strong> PromptCraft Architect (Technical Prompt Refinement)</p>
     </div>
     
+    <div class="removed-notice" id="removedNotice">
+        <strong>Model removed.</strong> <a href="#" id="undoRemove" style="color: #856404; text-decoration: underline;">Undo</a>
+    </div>
+    
     <h2>📊 Summary Table</h2>
-    {df.to_html(classes="summary-table", escape=False, index=False)}
+    <table class="summary-table">
+        <thead>
+            <tr>
+                <th>Model Name</th>
+                <th>Framework</th>
+                <th>Load Time (s)</th>
+                <th>Memory (MB)</th>
+                <th>Tokens/sec</th>
+                <th>Similarity Score</th>
+                <th>Error</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+"""
+    
+    # Generate table rows manually for better control
+    for idx, (_, row) in enumerate(df.iterrows()):
+        error_display = row.get('error', '') if not pd.isna(row.get('error', '')) else ''
+        html_content += f"""
+            <tr class="model-row" id="table-row-{idx}">
+                <td>{row['model_name']}</td>
+                <td>{row['framework']}</td>
+                <td>{row['load_time']:.2f}</td>
+                <td>{row['peak_memory_mb']:.1f}</td>
+                <td>{row['tokens_per_sec']:.2f}</td>
+                <td>{row['similarity_score']:.3f}</td>
+                <td>{error_display}</td>
+                <td>
+                    <button class="table-remove-btn" onclick="removeModel('{idx}', '{row['model_name']}')" title="Remove this model result">×</button>
+                </td>
+            </tr>
+"""
+    
+    html_content += """
+        </tbody>
+    </table>
     
     <h2>📝 Detailed Outputs</h2>
 """
     
     # Add detailed sections for each model
-    for _, row in df.iterrows():
+    for idx, (_, row) in enumerate(df.iterrows()):
         output_file = row.get('output_file', '')
         # Handle NaN values (pandas converts None to NaN which is a float)
         if pd.isna(output_file):
@@ -543,8 +637,11 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
                         response = content
                 
                 html_content += f"""
-    <div class="model-section">
-        <div class="model-header">{row['model_name']}</div>
+    <div class="model-section" id="model-{idx}">
+        <div class="model-header">
+            {row['model_name']}
+            <button class="remove-btn" onclick="removeModel('{idx}', '{row['model_name']}')" title="Remove this model result">×</button>
+        </div>
         <div class="metrics">
             <div class="metric">
                 <div class="metric-value">{row['tokens_per_sec']:.1f}</div>
@@ -573,7 +670,110 @@ def generate_html_report(df: pd.DataFrame, output_files: List[str]):
             except Exception as e:
                 print(f"Could not read {output_file}: {e}")
     
+    # Add JavaScript code using regular string concatenation to avoid f-string issues
     html_content += """
+    <script>
+        let lastRemovedElements = { tableRow: null, modelSection: null };
+        let lastRemovedModelName = '';
+        let lastRemovedIndex = '';
+        
+        function removeModel(modelId, modelName) {
+            const modelElement = document.getElementById('model-' + modelId);
+            const tableRow = document.getElementById('table-row-' + modelId);
+            const removedNotice = document.getElementById('removedNotice');
+            
+            // Store references for potential undo
+            lastRemovedElements.modelSection = modelElement ? modelElement.cloneNode(true) : null;
+            lastRemovedElements.tableRow = tableRow ? tableRow.cloneNode(true) : null;
+            lastRemovedModelName = modelName;
+            lastRemovedIndex = modelId;
+            
+            // Add fade-out animation and remove both elements
+            if (modelElement) {
+                modelElement.classList.add('fade-out');
+            }
+            if (tableRow) {
+                tableRow.classList.add('fade-out');
+            }
+            
+            // Remove elements after animation
+            setTimeout(() => {
+                if (modelElement) {
+                    modelElement.remove();
+                }
+                if (tableRow) {
+                    tableRow.remove();
+                }
+                
+                // Show undo notice
+                removedNotice.style.display = 'block';
+                removedNotice.innerHTML = '<strong>Model "' + modelName + '" removed from both sections.</strong> <a href="#" onclick="undoRemove()" style="color: #856404; text-decoration: underline;">Undo</a>';
+                
+                // Auto-hide notice after 10 seconds
+                setTimeout(() => {
+                    removedNotice.style.display = 'none';
+                }, 10000);
+            }, 300);
+        }
+        
+        function undoRemove() {
+            const removedNotice = document.getElementById('removedNotice');
+            const detailedOutputsSection = document.querySelector('h2:nth-of-type(2)');
+            const summaryTableBody = document.querySelector('.summary-table tbody');
+            
+            // Restore table row
+            if (lastRemovedElements.tableRow && summaryTableBody) {
+                // Find the correct position to insert the row back
+                const allRows = summaryTableBody.querySelectorAll('tr');
+                const targetIndex = parseInt(lastRemovedIndex);
+                
+                if (targetIndex < allRows.length) {
+                    summaryTableBody.insertBefore(lastRemovedElements.tableRow, allRows[targetIndex]);
+                } else {
+                    summaryTableBody.appendChild(lastRemovedElements.tableRow);
+                }
+                
+                // Remove fade-out class
+                lastRemovedElements.tableRow.classList.remove('fade-out');
+            }
+            
+            // Restore model section
+            if (lastRemovedElements.modelSection && detailedOutputsSection) {
+                // Find the correct position to insert the section back
+                const allSections = document.querySelectorAll('.model-section');
+                const targetIndex = parseInt(lastRemovedIndex);
+                
+                if (targetIndex < allSections.length) {
+                    detailedOutputsSection.parentNode.insertBefore(lastRemovedElements.modelSection, allSections[targetIndex]);
+                } else {
+                    detailedOutputsSection.parentNode.appendChild(lastRemovedElements.modelSection);
+                }
+                
+                // Remove fade-out class
+                lastRemovedElements.modelSection.classList.remove('fade-out');
+            }
+            
+            // Hide notice
+            removedNotice.style.display = 'none';
+            
+            // Clear stored references
+            lastRemovedElements = { tableRow: null, modelSection: null };
+            lastRemovedModelName = '';
+            lastRemovedIndex = '';
+        }
+        
+        // Hide notice when clicking anywhere else
+        document.addEventListener('click', function(event) {
+            const removedNotice = document.getElementById('removedNotice');
+            const undoLink = removedNotice.querySelector('a');
+            
+            if (event.target !== undoLink && removedNotice.style.display === 'block') {
+                setTimeout(() => {
+                    removedNotice.style.display = 'none';
+                }, 100);
+            }
+        });
+    </script>
 </body>
 </html>
 """
