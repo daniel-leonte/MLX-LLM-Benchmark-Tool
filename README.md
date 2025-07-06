@@ -16,6 +16,16 @@ python benchmark.py --list-models
 
 # Check memory requirements
 python benchmark.py --memory-check
+
+# run the server mode
+python benchmark.py --serve
+
+# run the server mode with a custom port
+python benchmark.py --serve --port 8000
+
+# overwrite benchmark history
+python benchmark.py --overwrite
+
 ```
 
 ## 📊 Features

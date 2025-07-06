@@ -17,6 +17,7 @@ from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
 import numpy as np
 import json
+import yaml
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import threading
@@ -29,6 +30,146 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
+
+# Configuration loading
+def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
+    """Load configuration from YAML file"""
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        print(f"📋 Configuration loaded from {config_path}")
+        return config
+    except FileNotFoundError:
+        print(f"⚠️  Config file {config_path} not found. Using default values.")
+        return get_default_config()
+    except yaml.YAMLError as e:
+        print(f"❌ Error parsing config file: {e}")
+        print("Using default values.")
+        return get_default_config()
+
+def get_default_config() -> Dict[str, Any]:
+    """Return default configuration if config file is not available"""
+    return {
+        "prompts": {
+            "system_prompt": """You are PromptCraft Architect, an AI specializing in refactoring user inputs into precise, structured, plain-text prompts for other advanced LLMs. Your focus is on a wide range of technical tasks for developers, from creating entire applications to fixing small bugs.
+
+Core Mission: Convert any developer request into a superior, plain-text prompt that clarifies intent and elicits the best possible technical response from an LLM, without inventing details.
+
+Guiding Principles:
+Precision is Paramount: Eliminate ambiguity. Be explicit.
+Context is Key, Not Assumed: Structure the user's provided context. Do not invent a tech stack or add technical details the user did not provide or clearly imply.
+Structure for Clarity: Use capitalized headers, lists, and line breaks to create a logical, easy-to-follow request.
+Adapt to Scope: Your output structure must fit the task, whether it's an end-to-end solution for an application or feature, a single function, or a debugging request.
+
+Execution Workflow
+
+1. Input Interpretation:
+Treat the entire user input as a draft prompt to rewrite.
+NEVER engage conversationally. Your sole function is prompt refinement.
+
+2. The Refactoring Blueprint:
+Construct the optimized prompt using these steps:
+
+A. ESTABLISH PERSONA:
+Begin with "Act as..." defining a relevant technical expert. If the tech stack is ambiguous, use a generalist persona like "Senior Software Engineer".
+
+B. CLARIFY SCOPE & CONTEXT:
+Analyze the input for what is known and what is missing.
+Explicitly state the known technologies. If a critical detail like programming language is missing, frame the request to be language-agnostic or use a placeholder like [Specify Language] to guide the end-user.
+Crucially, do not add assumptions. If the user asks for a "database script" without specifying the database, do not add "PostgreSQL." Frame the prompt around "a generic SQL script."
+
+C. ENFORCE ACTIONABLE STRUCTURE:
+Transform the request into a direct set of instructions or requirements.
+For creation tasks, detail what needs to be built.
+For debugging/refactoring tasks, clearly present the problematic code and the desired change or outcome.
+
+D. ADD GENERAL BEST PRACTICES:
+Where appropriate, incorporate general, non-stack-specific constraints like "Ensure the code is well-commented," "Consider security best practices," or "Optimize for readability."
+
+E. DEFINE CONCRETE GOAL:
+Conclude with GOAL: - a clear, one-sentence summary of the user's intended outcome.
+
+3. Output Rules (Non-Negotiable):
+Your output MUST BE the optimized prompt exclusively.
+The entire output prompt must be plain text. Do not use markdown characters.
+NO preambles, apologies, or meta-commentary.""",
+            "custom_prompt": "build a react app like facebook",
+            "gold_answer": """Act as a Senior Software Engineer specializing in React.
+
+CONTEXT:
+The user wants to create a React application similar to Facebook.
+
+INSTRUCTIONS:
+Develop a React application with the following features:
+  - User authentication (registration, login, logout).
+  - User profiles (displaying user information).
+  - Friend requests and management.
+  - Posting and viewing of text-based status updates.
+  - Basic news feed displaying posts from friends.
+
+Ensure the application is responsive and has a clean UI.
+Consider state management (e.g., using Context, Redux, or a similar library).
+Implement a basic backend (can be mocked or a simple API) for user data, posts, and friend connections.
+
+GOAL: Create a functional React application that mimics key features of Facebook.""",
+            "max_new_tokens": 800
+        },
+        "model_config": {
+            "small": {
+                "memory_limit_gb": 2.0,
+                "models": []
+            },
+            "medium": {
+                "memory_limit_gb": 4.0,
+                "models": [
+                    {"name": "mlx-community/Mistral-7B-Instruct-v0.3-4bit", "params": {}},
+                ]
+            },
+            "large": {
+                "memory_limit_gb": 6.0,
+                "models": [
+                    {"name": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit", "params": {}},
+                ]
+            },
+            "experimental": {
+                "memory_limit_gb": 5.0,
+                "models": []
+            }
+        }
+    }
+
+# Configuration will be loaded after argument parsing
+CONFIG = None
+
+def transform_model_config(config_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Transform YAML model config to the format expected by the benchmark script"""
+    transformed = {}
+    for category, category_config in config_dict.items():
+        # Handle case where models is None (empty YAML section with only comments)
+        models_list = category_config.get("models") or []
+        transformed[category] = {
+            "memory_limit_gb": category_config["memory_limit_gb"],
+            "models": [
+                (model["name"], model["params"]) 
+                for model in models_list
+            ]
+        }
+    return transformed
+
+def reload_configuration(config_path: str = "config.yaml") -> None:
+    """Reload configuration and update global variables"""
+    global CONFIG, SYSTEM_PROMPT, CUSTOM_PROMPT, GOLD_ANSWER, MAX_NEW_TOKENS, MODEL_CONFIG
+    
+    CONFIG = load_config(config_path)
+    
+    # Update prompt configuration
+    SYSTEM_PROMPT = CONFIG["prompts"]["system_prompt"]
+    CUSTOM_PROMPT = CONFIG["prompts"]["custom_prompt"]
+    GOLD_ANSWER = CONFIG["prompts"]["gold_answer"]
+    MAX_NEW_TOKENS = CONFIG["prompts"]["max_new_tokens"]
+    
+    # Update model configuration
+    MODEL_CONFIG = transform_model_config(CONFIG["model_config"])
 
 # Create results directory
 RESULTS_DIR = Path("results")
@@ -79,6 +220,12 @@ def parse_arguments():
         type=int, 
         default=8000,
         help="Port for web server (default: 8000, used with --serve)"
+    )
+    parser.add_argument(
+        "--config", 
+        type=str, 
+        default="config.yaml",
+        help="Path to configuration file (default: config.yaml)"
     )
     return parser.parse_args()
 
@@ -149,111 +296,15 @@ def check_memory_requirements():
     
     print("\n" + "=" * 60)
 
-# Configuration
-SYSTEM_PROMPT = """You are PromptCraft Architect, an AI specializing in refactoring user inputs into precise, structured, plain-text prompts for other advanced LLMs. Your focus is on a wide range of technical tasks for developers, from creating entire applications to fixing small bugs.
-
-Core Mission: Convert any developer request into a superior, plain-text prompt that clarifies intent and elicits the best possible technical response from an LLM, without inventing details.
-
-Guiding Principles:
-Precision is Paramount: Eliminate ambiguity. Be explicit.
-Context is Key, Not Assumed: Structure the user's provided context. Do not invent a tech stack or add technical details the user did not provide or clearly imply.
-Structure for Clarity: Use capitalized headers, lists, and line breaks to create a logical, easy-to-follow request.
-Adapt to Scope: Your output structure must fit the task, whether it's an end-to-end solution for an application or feature, a single function, or a debugging request.
-
-Execution Workflow
-
-1. Input Interpretation:
-Treat the entire user input as a draft prompt to rewrite.
-NEVER engage conversationally. Your sole function is prompt refinement.
-
-2. The Refactoring Blueprint:
-Construct the optimized prompt using these steps:
-
-A. ESTABLISH PERSONA:
-Begin with "Act as..." defining a relevant technical expert. If the tech stack is ambiguous, use a generalist persona like "Senior Software Engineer".
-
-B. CLARIFY SCOPE & CONTEXT:
-Analyze the input for what is known and what is missing.
-Explicitly state the known technologies. If a critical detail like programming language is missing, frame the request to be language-agnostic or use a placeholder like [Specify Language] to guide the end-user.
-Crucially, do not add assumptions. If the user asks for a "database script" without specifying the database, do not add "PostgreSQL." Frame the prompt around "a generic SQL script."
-
-C. ENFORCE ACTIONABLE STRUCTURE:
-Transform the request into a direct set of instructions or requirements.
-For creation tasks, detail what needs to be built.
-For debugging/refactoring tasks, clearly present the problematic code and the desired change or outcome.
-
-D. ADD GENERAL BEST PRACTICES:
-Where appropriate, incorporate general, non-stack-specific constraints like "Ensure the code is well-commented," "Consider security best practices," or "Optimize for readability."
-
-E. DEFINE CONCRETE GOAL:
-Conclude with GOAL: - a clear, one-sentence summary of the user's intended outcome.
-
-3. Output Rules (Non-Negotiable):
-Your output MUST BE the optimized prompt exclusively.
-The entire output prompt must be plain text. Do not use markdown characters.
-NO preambles, apologies, or meta-commentary."""
-
-CUSTOM_PROMPT = "build a react app like facebook"
-
-GOLD_ANSWER = """Act as a Senior Software Engineer specializing in React.
-
-CONTEXT:
-The user wants to create a React application similar to Facebook.
-
-INSTRUCTIONS:
-Develop a React application with the following features:
-  - User authentication (registration, login, logout).
-  - User profiles (displaying user information).
-  - Friend requests and management.
-  - Posting and viewing of text-based status updates.
-  - Basic news feed displaying posts from friends.
-
-Ensure the application is responsive and has a clean UI.
-Consider state management (e.g., using Context, Redux, or a similar library).
-Implement a basic backend (can be mocked or a simple API) for user data, posts, and friend connections.
-
-GOAL: Create a functional React application that mimics key features of Facebook."""
-
-MAX_NEW_TOKENS = 800  # Allow full technical responses for complex prompts
-
-# Model configuration with memory-aware organization
-MODEL_CONFIG = {
-    "small": {
-        "memory_limit_gb": 2.0,
-        "models": [
-            # ("mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-8bit", {}), poor output
-        ]
-    },
-    "medium": {
-        "memory_limit_gb": 4.0,
-        "models": [
-            ("mlx-community/Mistral-7B-Instruct-v0.3-4bit", {}), # 1. this is the best model for this task
-            # ("mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", {}),
-            ("mlx-community/Hermes-2-Pro-Mistral-7B-3bit", {}),
-            # ("mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit", {}),
-            # ("mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit", {}),
-        ]
-    },
-    "large": {
-        "memory_limit_gb": 6.0,
-        "models": [
-            # ("mlx-community/gemma-2-9b-it-4bit", {}), # weird output
-            # ("mlx-community/Qwen3-8B-4bit", {}), # maybe ok, but need to remove thinking output before the refactoredprompt output
-            ("mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit", {}), # 2. its good, concise, but at least at the first test, ran slow and consume some memory
-            # ("mlx-community/DeepSeek-R1-0528-Qwen3-8B-4bit", {}), # has the thinking ouput, need to reeavaluate at some time maybe
-        ]
-    },
-    "experimental": {
-        "memory_limit_gb": 5.0,
-        "models": [
-            ("mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx", {}),
-            ("mlx-community/DeepSeek-R1-0528-Qwen3-8B-4bit-DWQ", {}),
-        ]
-    }
-}
+# Configuration placeholders (will be loaded after argument parsing)
+SYSTEM_PROMPT = ""
+CUSTOM_PROMPT = ""
+GOLD_ANSWER = ""
+MAX_NEW_TOKENS = 800
+MODEL_CONFIG = {}
 
 # Runtime configuration
-MEMORY_SAFETY_MARGIN_GB = 2.0  # Keep 2GB free for system
+MEMORY_SAFETY_MARGIN_GB = 0.0  # Keep 0GB free for system
 MAX_CONCURRENT_MODELS = 1  # Process one model at a time
 SKIP_ON_MEMORY_ERROR = True  # Skip models that fail due to memory
 CATEGORIES_TO_RUN = ["small", "medium"]  # Which categories to run by default
@@ -262,11 +313,12 @@ def install_dependencies():
     """Install required dependencies if not available"""
     required_packages = [
         "mlx-lm",
-        "sentence-transformers",
+        "sentence-transformers", 
         "pandas",
         "numpy",
         "psutil",
-        "tqdm"
+        "tqdm",
+        "pyyaml"
     ]
     
     missing_packages = []
@@ -1005,6 +1057,9 @@ def main():
     
     # Parse command line arguments
     args = parse_arguments()
+    
+    # Load configuration from specified file
+    reload_configuration(args.config)
     
     # Update global configuration based on arguments
     MEMORY_SAFETY_MARGIN_GB = args.safety_margin

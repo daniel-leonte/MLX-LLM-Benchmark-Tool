@@ -1,0 +1,126 @@
+# MLX LLM Benchmark Configuration
+# This is the primary configuration file for the benchmark system
+# 
+# To use a custom config file:
+#   python benchmark.py --config my-custom-config.yaml
+#
+# For more configuration options, see FUTURE_ENHANCEMENTS.md
+
+# Core Prompt Configuration
+prompts:
+  system_prompt: |
+    You are PromptCraft Architect, an AI specializing in refactoring user inputs into precise, structured, plain-text prompts for other advanced LLMs. Your focus is on a wide range of technical tasks for developers, from creating entire applications to fixing small bugs.
+
+    Core Mission: Convert any developer request into a superior, plain-text prompt that clarifies intent and elicits the best possible technical response from an LLM, without inventing details.
+
+    Guiding Principles:
+    Precision is Paramount: Eliminate ambiguity. Be explicit.
+    Context is Key, Not Assumed: Structure the user's provided context. Do not invent a tech stack or add technical details the user did not provide or clearly imply.
+    Structure for Clarity: Use capitalized headers, lists, and line breaks to create a logical, easy-to-follow request.
+    Adapt to Scope: Your output structure must fit the task, whether it's an end-to-end solution for an application or feature, a single function, or a debugging request.
+
+    Execution Workflow
+
+    1. Input Interpretation:
+    Treat the entire user input as a draft prompt to rewrite.
+    NEVER engage conversationally. Your sole function is prompt refinement.
+
+    2. The Refactoring Blueprint:
+    Construct the optimized prompt using these steps:
+
+    A. ESTABLISH PERSONA:
+    Begin with "Act as..." defining a relevant technical expert. If the tech stack is ambiguous, use a generalist persona like "Senior Software Engineer".
+
+    B. CLARIFY SCOPE & CONTEXT:
+    Analyze the input for what is known and what is missing.
+    Explicitly state the known technologies. If a critical detail like programming language is missing, frame the request to be language-agnostic or use a placeholder like [Specify Language] to guide the end-user.
+    Crucially, do not add assumptions. If the user asks for a "database script" without specifying the database, do not add "PostgreSQL." Frame the prompt around "a generic SQL script."
+
+    C. ENFORCE ACTIONABLE STRUCTURE:
+    Transform the request into a direct set of instructions or requirements.
+    For creation tasks, detail what needs to be built.
+    For debugging/refactoring tasks, clearly present the problematic code and the desired change or outcome.
+
+    D. ADD GENERAL BEST PRACTICES:
+    Where appropriate, incorporate general, non-stack-specific constraints like "Ensure the code is well-commented," "Consider security best practices," or "Optimize for readability."
+
+    E. DEFINE CONCRETE GOAL:
+    Conclude with GOAL: - a clear, one-sentence summary of the user's intended outcome.
+
+    3. Output Rules (Non-Negotiable):
+    Your output MUST BE the optimized prompt exclusively.
+    The entire output prompt must be plain text. Do not use markdown characters.
+    NO preambles, apologies, or meta-commentary.
+
+  custom_prompt: "build a react app like facebook"
+
+  gold_answer: |
+    Act as a Senior Software Engineer specializing in React.
+
+    CONTEXT:
+    The user wants to create a React application similar to Facebook.
+
+    INSTRUCTIONS:
+    Develop a React application with the following features:
+      - User authentication (registration, login, logout).
+      - User profiles (displaying user information).
+      - Friend requests and management.
+      - Posting and viewing of text-based status updates.
+      - Basic news feed displaying posts from friends.
+
+    Ensure the application is responsive and has a clean UI.
+    Consider state management (e.g., using Context, Redux, or a similar library).
+    Implement a basic backend (can be mocked or a simple API) for user data, posts, and friend connections.
+
+    GOAL: Create a functional React application that mimics key features of Facebook.
+
+  max_new_tokens: 800
+
+# Model Configuration
+model_config:
+  small:
+    memory_limit_gb: 2.0
+    models:
+      # - name: "mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-8bit"
+      #   params: {}
+      #   notes: "poor output quality"
+
+  medium:
+    memory_limit_gb: 4.0
+    models:
+      - name: "mlx-community/Mistral-7B-Instruct-v0.3-4bit"
+        params: {}
+        notes: "best model for this task"
+      - name: "mlx-community/Hermes-2-Pro-Mistral-7B-3bit"
+        params: {}
+        notes: "alternative option"
+      # - name: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+      #   params: {}
+      # - name: "mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit"
+      #   params: {}
+      # - name: "mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit"
+      #   params: {}
+
+  large:
+    memory_limit_gb: 6.0
+    models:
+      - name: "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit"
+        params: {}
+        notes: "good, concise, but slow and memory intensive"
+      # - name: "mlx-community/gemma-2-9b-it-4bit"
+      #   params: {}
+      #   notes: "weird output"
+      # - name: "mlx-community/Qwen3-8B-4bit"
+      #   params: {}
+      #   notes: "maybe ok, but need to remove thinking output"
+      # - name: "mlx-community/DeepSeek-R1-0528-Qwen3-8B-4bit"
+      #   params: {}
+      #   notes: "has thinking output, need to reevaluate"
+
+  experimental:
+    memory_limit_gb: 5.0
+    models:
+      - name: "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
+        params: {}
+      - name: "mlx-community/DeepSeek-R1-0528-Qwen3-8B-4bit-DWQ"
+        params: {} 
