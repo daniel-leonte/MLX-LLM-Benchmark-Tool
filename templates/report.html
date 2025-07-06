@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{TITLE}}</title>
+    <link rel="stylesheet" href="report.css">
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 {{TITLE}}</h1>
+        <p><strong>🍎 Apple Silicon Optimized</strong> | PromptCraft Architect Test</p>
+        <p><strong>Prompt:</strong> "{{PROMPT}}"</p>
+        <p><strong>System Prompt:</strong> {{SYSTEM_PROMPT_DESCRIPTION}}</p>
+    </div>
+    
+    <div class="runs-info">
+        <h3>📊 Benchmark Runs Summary</h3>
+        <p><strong>Total Results:</strong> {{TOTAL_RESULTS}} models across {{RUNS_COUNT}} run(s)</p>
+        {{RUNS_BADGES}}
+    </div>
+    
+    <div class="removed-notice" id="removedNotice">
+        <strong>Model removed.</strong> <a href="#" id="undoRemove" style="color: #856404; text-decoration: underline;">Undo</a>
+    </div>
+    
+    <h2>📊 Summary Table</h2>
+    <table class="summary-table">
+        <thead>
+            <tr>
+                <th>Model Name</th>
+                <th>Framework</th>
+                <th>Load Time (s)</th>
+                <th>Memory (MB)</th>
+                <th>Tokens/sec</th>
+                <th>Similarity Score</th>
+                <th>Run Date</th>
+                <th>Error</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{RESULTS_TABLE_ROWS}}
+        </tbody>
+    </table>
+    
+    <h2>📝 Detailed Outputs</h2>
+    {{DETAILED_SECTIONS}}
+    
+    <script src="report.js"></script>
+</body>
+</html> 

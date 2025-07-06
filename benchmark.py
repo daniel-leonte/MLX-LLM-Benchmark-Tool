@@ -351,6 +351,7 @@ install_dependencies()
 from mlx_lm import load, generate
 from sentence_transformers import SentenceTransformer
 import mlx.core as mx
+from report_generator import create_report_generator
 
 def get_memory_usage() -> float:
     """Get current memory usage in MB"""
@@ -665,391 +666,31 @@ def merge_results(existing_results: List[Dict[str, Any]], new_results: List[Dict
     return merged_results
 
 def generate_html_report(df: pd.DataFrame, output_files: List[str]):
-    """Generate an HTML report with full outputs"""
-    
-    # Group results by run for better organization
-    runs_info = {}
-    if 'run_timestamp' in df.columns:
-        for _, row in df.iterrows():
-            run_id = row.get('run_id', 'unknown')
-            if run_id not in runs_info:
-                runs_info[run_id] = {
-                    'timestamp': row.get('run_timestamp', 'Unknown'),
-                    'count': 0
-                }
-            runs_info[run_id]['count'] += 1
-    
-    # Create HTML header with embedded CSS
-    html_content = f"""<!DOCTYPE html>
+    """Generate an HTML report using the template-based report generator"""
+    try:
+        # Create report generator instance
+        report_generator = create_report_generator()
+        
+        # Generate the report
+        report_generator.generate_report(df, CUSTOM_PROMPT)
+        
+    except Exception as e:
+        print(f"❌ Error generating HTML report: {e}")
+        print("Falling back to basic report generation...")
+        
+        # Fallback: create a basic HTML file if template system fails
+        html_file = RESULTS_DIR / "benchmark_report.html"
+        with open(html_file, "w", encoding="utf-8") as f:
+            f.write(f"""<!DOCTYPE html>
 <html>
-<head>
-    <title>MLX LLM Benchmark Results</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; }}
-        .header {{ background-color: #f0f0f0; padding: 20px; border-radius: 5px; }}
-        .runs-info {{ background-color: #e8f5e8; padding: 15px; margin: 15px 0; border-radius: 5px; }}
-        .run-badge {{ display: inline-block; background: #4CAF50; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8em; margin: 2px; }}
-        .model-section {{ margin: 30px 0; border: 1px solid #ddd; border-radius: 5px; position: relative; }}
-        .model-header {{ background-color: #e8f4f8; padding: 15px; font-weight: bold; position: relative; }}
-        .run-info {{ font-size: 0.8em; color: #666; margin-top: 5px; }}
-        .remove-btn {{ 
-            position: absolute; 
-            top: 10px; 
-            right: 10px; 
-            background: #ff4444; 
-            color: white; 
-            border: none; 
-            border-radius: 50%; 
-            width: 24px; 
-            height: 24px; 
-            font-size: 16px; 
-            cursor: pointer; 
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            line-height: 1;
-            transition: background-color 0.2s;
-        }}
-        .remove-btn:hover {{ background: #cc0000; }}
-        .remove-btn:active {{ background: #990000; }}
-        .table-remove-btn {{
-            background: #ff4444; 
-            color: white; 
-            border: none; 
-            border-radius: 50%; 
-            width: 20px; 
-            height: 20px; 
-            font-size: 12px; 
-            cursor: pointer; 
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            line-height: 1;
-            transition: background-color 0.2s;
-            margin-left: 5px;
-        }}
-        .table-remove-btn:hover {{ background: #cc0000; }}
-        .table-remove-btn:active {{ background: #990000; }}
-        .metrics {{ display: flex; gap: 20px; padding: 15px; background-color: #f9f9f9; }}
-        .metric {{ text-align: center; }}
-        .metric-value {{ font-size: 1.5em; font-weight: bold; color: #2196F3; }}
-        .metric-label {{ font-size: 0.9em; color: #666; }}
-        .output {{ padding: 20px; font-family: monospace; background-color: #f8f8f8; 
-                 white-space: pre-wrap; border-top: 1px solid #ddd; }}
-        .summary-table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-        .summary-table th, .summary-table td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-        .summary-table th {{ background-color: #f2f2f2; }}
-        .summary-table tr.model-row {{ transition: all 0.3s ease-in-out; }}
-        .removed-notice {{ 
-            background-color: #fff3cd; 
-            border: 1px solid #ffeaa7; 
-            color: #856404; 
-            padding: 10px; 
-            margin: 10px 0; 
-            border-radius: 5px; 
-            display: none; 
-        }}
-        .removed-notice.success {{
-            background-color: #d4edda;
-            border-color: #c3e6cb;
-            color: #155724;
-        }}
-        .removed-notice.error {{
-            background-color: #f8d7da;
-            border-color: #f5c6cb;
-            color: #721c24;
-        }}
-        .removed-notice.warning {{
-            background-color: #fff3cd;
-            border-color: #ffeaa7;
-            color: #856404;
-        }}
-        .fade-out {{ 
-            opacity: 0; 
-            transform: translateX(100%); 
-            transition: all 0.3s ease-in-out; 
-        }}
-    </style>
-</head>
+<head><title>MLX LLM Benchmark Results</title></head>
 <body>
-    <div class="header">
-        <h1>🚀 MLX LLM Benchmark Results</h1>
-        <p><strong>🍎 Apple Silicon Optimized</strong> | PromptCraft Architect Test</p>
-        <p><strong>Prompt:</strong> "{CUSTOM_PROMPT}"</p>
-        <p><strong>System Prompt:</strong> PromptCraft Architect (Technical Prompt Refinement)</p>
-    </div>
-    
-    <div class="runs-info">
-        <h3>📊 Benchmark Runs Summary</h3>
-        <p><strong>Total Results:</strong> {len(df)} models across {len(runs_info)} run(s)</p>
-"""
-    
-    if runs_info:
-        html_content += "<p><strong>Runs:</strong> "
-        for run_id, info in runs_info.items():
-            timestamp = info['timestamp'][:19] if len(info['timestamp']) > 19 else info['timestamp']  # Truncate milliseconds
-            html_content += f'<span class="run-badge">{timestamp} ({info["count"]} models)</span>'
-        html_content += "</p>"
-    
-    html_content += """
-    </div>
-    
-    <div class="removed-notice" id="removedNotice">
-        <strong>Model removed.</strong> <a href="#" id="undoRemove" style="color: #856404; text-decoration: underline;">Undo</a>
-    </div>
-    
-    <h2>📊 Summary Table</h2>
-    <table class="summary-table">
-        <thead>
-            <tr>
-                <th>Model Name</th>
-                <th>Framework</th>
-                <th>Load Time (s)</th>
-                <th>Memory (MB)</th>
-                <th>Tokens/sec</th>
-                <th>Similarity Score</th>
-                <th>Run Date</th>
-                <th>Error</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-"""
-    
-    # Generate table rows manually for better control
-    for idx, (_, row) in enumerate(df.iterrows()):
-        error_display = row.get('error', '') if not pd.isna(row.get('error', '')) else ''
-        run_date = row.get('run_timestamp', 'Unknown')[:19] if pd.notna(row.get('run_timestamp', '')) else 'Unknown'
-        run_id = row.get('run_id', 'unknown')
-        
-        html_content += f"""
-            <tr class="model-row" id="table-row-{idx}" data-model-name="{row['model_name']}" data-run-id="{run_id}">
-                <td>{row['model_name']}</td>
-                <td>{row['framework']}</td>
-                <td>{row['load_time']:.2f}</td>
-                <td>{row['peak_memory_mb']:.1f}</td>
-                <td>{row['tokens_per_sec']:.2f}</td>
-                <td>{row['similarity_score']:.3f}</td>
-                <td>{run_date}</td>
-                <td>{error_display}</td>
-                <td>
-                    <button class="table-remove-btn" onclick="removeModel('{idx}', '{row['model_name']}', '{run_id}')" title="Remove this model result">×</button>
-                </td>
-            </tr>
-"""
-    
-    html_content += """
-        </tbody>
-    </table>
-    
-    <h2>📝 Detailed Outputs</h2>
-"""
-    
-    # Add detailed sections for each model
-    for idx, (_, row) in enumerate(df.iterrows()):
-        output_file = row.get('output_file', '')
-        run_date = row.get('run_timestamp', 'Unknown')[:19] if pd.notna(row.get('run_timestamp', '')) else 'Unknown'
-        run_id = row.get('run_id', 'unknown')
-        
-        # Handle NaN values (pandas converts None to NaN which is a float)
-        if pd.isna(output_file):
-            output_file = ''
-        if output_file and isinstance(output_file, str) and os.path.exists(output_file):
-            try:
-                with open(output_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    # Extract just the response part
-                    if "FULL RESPONSE:" in content:
-                        response = content.split("FULL RESPONSE:\n" + "-" * 80 + "\n")[1]
-                    else:
-                        response = content
-                
-                html_content += f"""
-    <div class="model-section" id="model-{idx}" data-model-name="{row['model_name']}" data-run-id="{run_id}">
-        <div class="model-header">
-            {row['model_name']}
-            <div class="run-info">Run: {run_date}</div>
-            <button class="remove-btn" onclick="removeModel('{idx}', '{row['model_name']}', '{run_id}')" title="Remove this model result">×</button>
-        </div>
-        <div class="metrics">
-            <div class="metric">
-                <div class="metric-value">{row['tokens_per_sec']:.1f}</div>
-                <div class="metric-label">Tokens/sec</div>
-            </div>
-            <div class="metric">
-                <div class="metric-value">{row['tokens_generated']}</div>
-                <div class="metric-label">Tokens</div>
-            </div>
-            <div class="metric">
-                <div class="metric-value">{row['load_time']:.2f}s</div>
-                <div class="metric-label">Load Time</div>
-            </div>
-            <div class="metric">
-                <div class="metric-value">{row['peak_memory_mb']:.0f}MB</div>
-                <div class="metric-label">Memory</div>
-            </div>
-            <div class="metric">
-                <div class="metric-value">{row['similarity_score']:.3f}</div>
-                <div class="metric-label">Similarity</div>
-            </div>
-        </div>
-        <div class="output">{response}</div>
-    </div>
-"""
-            except Exception as e:
-                print(f"Could not read {output_file}: {e}")
-    
-    # Add JavaScript code using regular string concatenation to avoid f-string issues
-    html_content += """
-    <script>
-        let isServerMode = window.location.protocol === 'http:';
-        let pendingDeletions = [];
-        
-        function removeModel(modelId, modelName, runId) {
-            if (isServerMode) {
-                // Server mode: Send DELETE request to permanently remove from database
-                removeModelFromServer(modelId, modelName, runId);
-            } else {
-                // Static mode: Just hide elements (original behavior)
-                removeModelLocally(modelId, modelName, runId);
-            }
-        }
-        
-        function removeModelFromServer(modelId, modelName, runId) {
-            const modelElement = document.getElementById('model-' + modelId);
-            const tableRow = document.getElementById('table-row-' + modelId);
-            const removedNotice = document.getElementById('removedNotice');
-            
-            // Show loading state
-            if (modelElement) {
-                modelElement.style.opacity = '0.5';
-            }
-            if (tableRow) {
-                tableRow.style.opacity = '0.5';
-            }
-            
-            // Send DELETE request to server
-            const url = '/api/remove-result?model_name=' + encodeURIComponent(modelName) + '&run_id=' + encodeURIComponent(runId);
-            
-            fetch(url, {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json',
-                }
-            })
-            .then(response => {
-                if (response.ok) {
-                    return response.json();
-                } else {
-                    throw new Error('Failed to remove result from server');
-                }
-            })
-            .then(data => {
-                // Success: The server will regenerate the HTML, so we reload the page
-                showNotification('Model "' + modelName + '" permanently removed from database. Reloading...', 'success');
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1500);
-            })
-            .catch(error => {
-                console.error('Error removing model:', error);
-                
-                // Restore opacity
-                if (modelElement) {
-                    modelElement.style.opacity = '1';
-                }
-                if (tableRow) {
-                    tableRow.style.opacity = '1';
-                }
-                
-                showNotification('Error removing model: ' + error.message, 'error');
-            });
-        }
-        
-        function removeModelLocally(modelId, modelName, runId) {
-            // Original local removal behavior for static files
-            const modelElement = document.getElementById('model-' + modelId);
-            const tableRow = document.getElementById('table-row-' + modelId);
-            
-            // Store for potential undo
-            let lastRemovedElements = { 
-                tableRow: tableRow ? tableRow.cloneNode(true) : null,
-                modelSection: modelElement ? modelElement.cloneNode(true) : null 
-            };
-            
-            // Add fade-out animation
-            if (modelElement) {
-                modelElement.classList.add('fade-out');
-            }
-            if (tableRow) {
-                tableRow.classList.add('fade-out');
-            }
-            
-            // Remove elements after animation
-            setTimeout(() => {
-                if (modelElement) {
-                    modelElement.remove();
-                }
-                if (tableRow) {
-                    tableRow.remove();
-                }
-                
-                showNotification('Model "' + modelName + '" removed locally (not from database). <a href="#" onclick="undoLocalRemove()">Undo</a>', 'warning');
-            }, 300);
-        }
-        
-        function showNotification(message, type = 'info') {
-            const removedNotice = document.getElementById('removedNotice');
-            removedNotice.className = 'removed-notice ' + type;
-            removedNotice.innerHTML = '<strong>' + message + '</strong>';
-            removedNotice.style.display = 'block';
-            
-            // Auto-hide after 10 seconds
-            setTimeout(() => {
-                removedNotice.style.display = 'none';
-            }, 10000);
-        }
-        
-        function undoLocalRemove() {
-            // This would be more complex to implement properly
-            // For now, just suggest reloading the page
-            showNotification('To restore locally removed items, please reload the page.', 'info');
-        }
-        
-        // Hide notice when clicking anywhere else
-        document.addEventListener('click', function(event) {
-            const removedNotice = document.getElementById('removedNotice');
-            const isClickOnNotice = removedNotice.contains(event.target);
-            
-            if (!isClickOnNotice && removedNotice.style.display === 'block') {
-                setTimeout(() => {
-                    removedNotice.style.display = 'none';
-                }, 100);
-            }
-        });
-        
-        // Show server mode indicator
-        if (isServerMode) {
-            document.addEventListener('DOMContentLoaded', function() {
-                const header = document.querySelector('.header');
-                if (header) {
-                    const serverBadge = document.createElement('div');
-                    serverBadge.innerHTML = '🌐 <strong>Server Mode:</strong> Deletions are permanent and saved to database';
-                    serverBadge.style.cssText = 'background: #e8f5e8; border: 1px solid #4CAF50; padding: 8px; margin: 10px 0; border-radius: 4px; font-size: 0.9em;';
-                    header.appendChild(serverBadge);
-                }
-            });
-        }
-    </script>
+    <h1>MLX LLM Benchmark Results</h1>
+    <p>Report generation failed. Please check the console for errors.</p>
+    <p>Error: {e}</p>
 </body>
-</html>
-"""
-    
-    html_file = RESULTS_DIR / "benchmark_report.html"
-    with open(html_file, "w", encoding="utf-8") as f:
-        f.write(html_content)
-    
-    print(f"🌐 HTML report generated: {html_file}")
+</html>""")
+        print(f"📄 Basic HTML report generated: {html_file}")
 
 def main():
     """Main benchmarking function"""
@@ -1256,6 +897,28 @@ class BenchmarkHTTPRequestHandler(BaseHTTPRequestHandler):
                     self.wfile.write(f.read().encode('utf-8'))
             else:
                 self.send_error(404, "Report not found")
+        elif parsed_path.path == '/report.css':
+            # Serve the CSS file
+            css_file = RESULTS_DIR / "report.css"
+            if css_file.exists():
+                self.send_response(200)
+                self.send_header('Content-type', 'text/css')
+                self.end_headers()
+                with open(css_file, 'r', encoding='utf-8') as f:
+                    self.wfile.write(f.read().encode('utf-8'))
+            else:
+                self.send_error(404, "CSS not found")
+        elif parsed_path.path == '/report.js':
+            # Serve the JS file
+            js_file = RESULTS_DIR / "report.js"
+            if js_file.exists():
+                self.send_response(200)
+                self.send_header('Content-type', 'application/javascript')
+                self.end_headers()
+                with open(js_file, 'r', encoding='utf-8') as f:
+                    self.wfile.write(f.read().encode('utf-8'))
+            else:
+                self.send_error(404, "JS not found")
         else:
             self.send_error(404, "Not found")
     
